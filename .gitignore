@@ -1,0 +1,9 @@
+venv/
+.env
+*.log
+__pycache__/
+
+# 以下三個按照字面意思解讀 (我們使用時間戳記儲存圖片與歷史紀錄)
+uploads/
+generated/
+history_projects/
