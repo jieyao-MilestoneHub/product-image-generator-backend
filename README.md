@@ -66,7 +66,7 @@
 
 
 ## 雲端架構
-```mremaid
+```mermaid
 graph TD
     A[React Frontend] -- CloudFront --> B[API Gateway]
     B --> C[Lambda Function]
