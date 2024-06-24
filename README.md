@@ -94,6 +94,6 @@ graph TD
     end
 
     subgraph Analytics
-        H/react Chart
+        H(/react Chart)
     end
 ```
