@@ -75,7 +75,8 @@ graph TD
     C --> F[SageMaker]
     F --> G[Bedrock]
     E --> G
-    E --> H([QuickSight | React Chart])
+    E --> H(QuickSight)
+    E --> I(React Chart)
 
     subgraph Frontend
         A
@@ -95,5 +96,6 @@ graph TD
 
     subgraph Analytics
         H
+        I
     end
 ```
