@@ -8,10 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict
 import json
+import pandas as pd
+import io
 
 # 配置日誌
 logging.basicConfig(level=logging.INFO, filename='app.log', filemode='a',
-                    format='%(asctime)s - %(name)s - %(levellevel)s - %(message)s')
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 app = FastAPI()
 
@@ -27,6 +29,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+MOCK_DYNAMO_DB = {
+    "a": ["1001,2002,3002,4003", "1002,2003,3003,4004"],
+    "b": ["1002,2001,3001,4002"],
+    "c": ["1001,2005,3004,4001", "1001,2002,3005,4005"],
+    "d": ["1002,2004,3002,4003"],
+    "e": ["1001,2003,3003,4004"]
+}
+
+GENDER_TAGS = {
+    "1001": "男性",
+    "1002": "女性"
+}
+
+AGE_TAGS = {
+    "2001": "18-24",
+    "2002": "25-34",
+    "2003": "35-44",
+    "2004": "45-54",
+    "2005": "55+"
+}
+
+OCCUPATION_TAGS = {
+    "3001": "學生",
+    "3002": "軟體工程師",
+    "3003": "醫生",
+    "3004": "教師",
+    "3005": "其他"
+}
+
+INTEREST_TAGS = {
+    "4001": "音樂",
+    "4002": "運動",
+    "4003": "旅行",
+    "4004": "閱讀",
+    "4005": "遊戲"
+}
 
 # 創建儲存圖片的目錄
 STATIC_DIR = "static"
@@ -74,6 +113,55 @@ def cleanup_old_uploads():
                 shutil.rmtree(folder_path)
                 logging.info(f"Deleted old upload-only directory: {folder_path}")
 
+# 上傳CSV並傳回標籤分析結果
+@app.post("/api/upload-audience")
+async def upload_audience(file: UploadFile = File(...)):
+    try:
+        # 讀取 CSV 文件
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+        
+        # 構建對應結構
+        gender_labels = []
+        age_labels = []
+        occupation_labels = []
+        interest_labels = []
+        for index, row in df.iterrows():
+            uid = row['uid']
+            if uid in MOCK_DYNAMO_DB:
+                labels = MOCK_DYNAMO_DB[uid]
+                for label in labels:
+                    for tag in label.split(','):
+                        if tag in GENDER_TAGS:
+                            gender_labels.append(tag)
+                        elif tag in AGE_TAGS:
+                            age_labels.append(tag)
+                        elif tag in OCCUPATION_TAGS:
+                            occupation_labels.append(tag)
+                        elif tag in INTEREST_TAGS:
+                            interest_labels.append(tag)
+        
+        # 統計每個標籤出現次數
+        def count_labels(label_list, tags_dict):
+            label_counts = {name: 0 for name in tags_dict.values()}
+            for tag in label_list:
+                label_counts[tags_dict[tag]] += 1
+            return {"labels": list(label_counts.keys()), "values": list(label_counts.values())}
+        
+        gender_data = count_labels(gender_labels, GENDER_TAGS)
+        age_data = count_labels(age_labels, AGE_TAGS)
+        occupation_data = count_labels(occupation_labels, OCCUPATION_TAGS)
+        interest_data = count_labels(interest_labels, INTEREST_TAGS)
+
+        return {
+            "gender_data": gender_data,
+            "age_data": age_data,
+            "occupation_data": occupation_data,
+            "interest_data": interest_data
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/target-audiences")
 async def get_target_audiences():
     return JSONResponse(content=TARGET_AUDIENCES)
@@ -102,12 +190,14 @@ async def upload_image(product_image: UploadFile = File(...)):
 @app.post("/api/generate-images")
 async def generate_images(
     project_name: str = Form(...),
+    project_describe: str = Form(...),
     target_audience: str = Form(...),
     product_image_filename: str = Form(...),
     timestamp: str = Form(...)
 ):
     try:
         logging.info(f"Received project_name: {project_name}")
+        logging.info(f"Received project_describe: {project_describe}")
         logging.info(f"Received target_audience: {target_audience}")
         logging.info(f"Received product_image_filename: {product_image_filename}")
         logging.info(f"Received timestamp: {timestamp}")
@@ -137,6 +227,7 @@ async def generate_images(
         # Save all historical records to a dictionary
         project_info = {
             "write_date": timestamp,
+            "project_describe": project_describe,
             "project_name": project_name,
             "target_audience": target_audience,
             "product_image_filename": product_image_filename,
@@ -156,6 +247,7 @@ async def generate_images(
             shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
         return JSONResponse(content={"error": "Error generating images"}, status_code=500)
 
+
 @app.get("/api/history")
 async def get_history():
     filename = os.path.join(STATIC_DIR, "history_setting.json")
@@ -165,6 +257,7 @@ async def get_history():
             return JSONResponse(content=history)
     else:
         return JSONResponse(content=[], status_code=200)
+    
 
 # 提供靜態文件的服務
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

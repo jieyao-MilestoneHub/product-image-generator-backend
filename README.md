@@ -63,3 +63,37 @@
     - 每次生成圖片成功後，系統會將生成的圖片信息和項目信息保存到 `static/history_setting.json` 文件中，並上傳到 S3。
     - 歷史紀錄包括項目名稱、投放定向、上傳圖片文件名和生成圖片列表等信息。
     - 在調用歷史紀錄 API 時，系統會從 S3 下載 `history_setting.json` 文件，並返回其中的歷史紀錄信息。
+
+
+## 雲端架構
+```mremaid
+graph TD
+    A[React Frontend] -- CloudFront --> B[API Gateway]
+    B --> C[Lambda Function]
+    C --> D[DynamoDB]
+    C --> E[S3 Storage]
+    C --> F[SageMaker]
+    F --> G[Bedrock]
+    E --> G
+    E --> H[QuickSight]
+
+    subgraph Frontend
+        A
+    end
+
+    subgraph Backend
+        B
+        C
+        D
+        E
+    end
+
+    subgraph AI/ML
+        F
+        G
+    end
+
+    subgraph Analytics
+        H
+    end
+```
