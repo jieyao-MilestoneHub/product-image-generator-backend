@@ -1,6 +1,6 @@
 # 使用指南
 
-本專案旨在透過 AIGC 解決廣告素材製作成本的問題，需要搭配 `product-image-generator-frontend`。
+這個專案旨在透過 AIGC 進行精準投放，需要搭配 [`product-image-generator-frontend`](https://github.com/jieyao-MilestoneHub/product-image-generator-frontend) 一起使用。
 
 ## 安裝和運行
 
