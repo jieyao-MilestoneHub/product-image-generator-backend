@@ -10,6 +10,7 @@ from typing import Dict
 import json
 import pandas as pd
 import io
+from bedrock.text_generator import TextGenerator
 
 # 配置日誌
 logging.basicConfig(level=logging.INFO, filename='app.log', filemode='a',
@@ -187,6 +188,33 @@ async def upload_image(product_image: UploadFile = File(...)):
         logging.error(f"Error uploading image: {str(e)}")
         return JSONResponse(content={"error": "Error uploading image"}, status_code=500)
 
+@app.post("/api/generate-text")
+async def generate_text(
+    product_name: str = Form(...),
+    product_describe: str = Form(...),
+    audience_types: str = Form(...),
+    length: str = Form("short")
+):
+    try:
+        text_generator = TextGenerator()
+        audience_types_list = audience_types.split(',')
+        texts = []
+
+        for audience_type in audience_types_list:
+            ad_copy = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length)
+            if ad_copy:
+                texts.append({
+                    "audienceType": audience_type,
+                    "text": ad_copy
+                })
+            else:
+                raise HTTPException(status_code=500, detail="Text generation failed")
+
+        return JSONResponse(content={"texts": texts})
+    except Exception as e:
+        logging.error(f"Error generating text: {str(e)}")
+        return JSONResponse(content={"error": "Error generating text"}, status_code=500)
+
 @app.post("/api/generate-images")
 async def generate_images(
     project_name: str = Form(...),
@@ -246,7 +274,6 @@ async def generate_images(
         if os.path.exists(upload_path):
             shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
         return JSONResponse(content={"error": "Error generating images"}, status_code=500)
-
 
 @app.get("/api/history")
 async def get_history():
