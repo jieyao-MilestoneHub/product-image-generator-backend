@@ -13,8 +13,18 @@ import io
 from bedrock.text_generator import TextGenerator
 
 # 配置日誌
-logging.basicConfig(level=logging.INFO, filename='app.log', filemode='a',
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+file_handler = logging.FileHandler('app.log', mode='a', encoding='utf-8')
+file_handler.setFormatter(log_formatter)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+
+app_logger = logging.getLogger()
+app_logger.setLevel(logging.INFO)
+app_logger.addHandler(file_handler)
+app_logger.addHandler(stream_handler)
 
 app = FastAPI()
 
@@ -193,19 +203,24 @@ async def generate_text(
     product_name: str = Form(...),
     product_describe: str = Form(...),
     audience_types: str = Form(...),
-    length: str = Form("short")
+    length: str = Form("短文")
 ):
     try:
         text_generator = TextGenerator()
         audience_types_list = audience_types.split(',')
-        texts = []
+        
+        # 使用 prompt 技術選擇五組最有可能的組合
+        selected_combinations = text_generator.prompt_top_combinations(audience_types_list, n=5)
 
-        for audience_type in audience_types_list:
-            ad_copy = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length)
-            if ad_copy:
+        texts = []
+        for audience_type in selected_combinations:
+            ad_copy_short = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length="短文")
+            ad_copy_long = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length="長文")
+            if ad_copy_short and ad_copy_long:
                 texts.append({
                     "audienceType": audience_type,
-                    "text": ad_copy
+                    "shortText": ad_copy_short,
+                    "longText": ad_copy_long
                 })
             else:
                 raise HTTPException(status_code=500, detail="Text generation failed")
