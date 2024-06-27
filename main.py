@@ -6,11 +6,12 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict
+from pydantic import BaseModel
+from typing import Dict, List
 import json
 import pandas as pd
 import io
-from bedrock.text_generator import TextGenerator
+from langchain_model.text_generator import AdGenerator
 
 # 配置日誌
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -77,6 +78,19 @@ INTEREST_TAGS = {
     "4004": "閱讀",
     "4005": "遊戲"
 }
+
+class AdGenerateRequest(BaseModel):
+    product_name: str
+    product_describe: str
+    target_audience: str
+    product_image_url: str
+
+class ImageGenerateRequest(BaseModel):
+    product_name: str
+    product_describe: str
+    target_audience: str
+    product_image_filename: str
+    timestamp: str
 
 # 創建儲存圖片的目錄
 STATIC_DIR = "static"
@@ -192,55 +206,27 @@ async def upload_image(product_image: UploadFile = File(...)):
         with open(upload_path, "wb") as buffer:
             shutil.copyfileobj(product_image.file, buffer)
 
-        logging.info(f"Uploaded image: {product_image.filename}")
+        logging.info(f"Uploaded image: {timestamp}/upload/{product_image.filename}")
         return JSONResponse(content={"filename": f"{timestamp}/upload/{product_image.filename}", "timestamp": timestamp})
     except Exception as e:
         logging.error(f"Error uploading image: {str(e)}")
         return JSONResponse(content={"error": "Error uploading image"}, status_code=500)
 
-@app.post("/api/generate-text")
-async def generate_text(
+@app.post("/api/generate-product")
+async def generate_project(
     product_name: str = Form(...),
     product_describe: str = Form(...),
-    audience_types: str = Form(...),
-    length: str = Form("短文")
-):
-    try:
-        text_generator = TextGenerator()
-        audience_types_list = audience_types.split(',')
-        
-        # 使用 prompt 技術選擇五組最有可能的組合
-        selected_combinations = text_generator.prompt_top_combinations(audience_types_list, n=5)
-
-        texts = []
-        for audience_type in selected_combinations:
-            ad_copy_short = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length="短文")
-            ad_copy_long = text_generator.generate_ad_copy(product_name, product_describe, audience_type, length="長文")
-            if ad_copy_short and ad_copy_long:
-                texts.append({
-                    "audienceType": audience_type,
-                    "shortText": ad_copy_short,
-                    "longText": ad_copy_long
-                })
-            else:
-                raise HTTPException(status_code=500, detail="Text generation failed")
-
-        return JSONResponse(content={"texts": texts})
-    except Exception as e:
-        logging.error(f"Error generating text: {str(e)}")
-        return JSONResponse(content={"error": "Error generating text"}, status_code=500)
-
-@app.post("/api/generate-images")
-async def generate_images(
-    project_name: str = Form(...),
-    project_describe: str = Form(...),
     target_audience: str = Form(...),
     product_image_filename: str = Form(...),
     timestamp: str = Form(...)
 ):
     try:
-        logging.info(f"Received project_name: {project_name}")
-        logging.info(f"Received project_describe: {project_describe}")
+        ad_generator = AdGenerator()
+        short_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="短文")
+        long_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="長文")
+
+        logging.info(f"Received product_name: {product_name}")
+        logging.info(f"Received product_describe: {product_describe}")
         logging.info(f"Received target_audience: {target_audience}")
         logging.info(f"Received product_image_filename: {product_image_filename}")
         logging.info(f"Received timestamp: {timestamp}")
@@ -253,42 +239,43 @@ async def generate_images(
         generated_dir = os.path.join(STATIC_DIR, timestamp, "generated")
         os.makedirs(generated_dir, exist_ok=True)
 
-        # Simulate generating images and saving them
+        logging.info(generated_dir)
+
         generated_images = [f"generated_{i}.jpg" for i in range(1, 4)]
         for image_name in generated_images:
             generated_path = os.path.join(generated_dir, image_name)
             shutil.copyfile(upload_path, generated_path)
 
         if not os.path.exists(generated_path):
-            # 如果生成失敗，刪除上傳的圖片
             shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
-            logging.error(f"Failed to generate images for project {project_name}")
+            logging.error(f"Failed to generate images for project {product_name}")
             raise HTTPException(status_code=500, detail="Failed to generate images")
 
-        logging.info(f"Generated images for project {project_name}, target audience: {target_audience}")
+        logging.info(f"Generated images for project {product_name}, target audience: {target_audience}")
 
-        # Save all historical records to a dictionary
         project_info = {
             "write_date": timestamp,
-            "project_describe": project_describe,
-            "project_name": project_name,
+            "product_describe": product_describe,
+            "product_name": product_name,
             "target_audience": target_audience,
             "product_image_filename": product_image_filename,
-            "generated_images": [f"{timestamp}/generated/{img}" for img in generated_images]
+            "generated_images": [f"{timestamp}/generated/{img}" for img in generated_images],
+            "short_ad": short_ad,
+            "long_ad": long_ad
         }
 
         save_project_info(project_info)
 
         return JSONResponse(content=project_info)
+
     except HTTPException as he:
         logging.error(f"HTTP error: {str(he)}")
         return JSONResponse(content={"error": he.detail}, status_code=he.status_code)
     except Exception as e:
-        logging.error(f"Error generating images: {str(e)}")
-        # 刪除上傳的圖片
+        logging.error(f"Error generating project: {str(e)}")
         if os.path.exists(upload_path):
             shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
-        return JSONResponse(content={"error": "Error generating images"}, status_code=500)
+        return JSONResponse(content={"error": "Error generating project"}, status_code=500)
 
 @app.get("/api/history")
 async def get_history():

@@ -1,19 +1,27 @@
 {
-    "option1": "男性",
-    "option2": "女性",
-    "option3": "18-24",
-    "option4": "25-34",
-    "option5": "35-44",
-    "option6": "45-54",
-    "option7": "55+",
-    "option8": "學生",
-    "option9": "軟體工程師",
-    "option10": "醫生",
-    "option11": "教師",
-    "option12": "其他",
-    "option13": "音樂",
-    "option14": "運動",
-    "option15": "旅行",
-    "option16": "閱讀",
-    "option17": "遊戲"
+    "gender": {
+        "option1": "男性",
+        "option2": "女性"
+    },
+    "age": {
+        "option3": "18-24",
+        "option4": "25-34",
+        "option5": "35-44",
+        "option6": "45-54",
+        "option7": "55+"
+    },
+    "occupation": {
+        "option8": "學生",
+        "option9": "軟體工程師",
+        "option10": "醫生",
+        "option11": "教師",
+        "option12": "其他"
+    },
+    "interest": {
+        "option13": "音樂",
+        "option14": "運動",
+        "option15": "旅行",
+        "option16": "閱讀",
+        "option17": "遊戲"
+    }
 }
