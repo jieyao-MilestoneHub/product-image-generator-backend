@@ -9,3 +9,4 @@ static/
 *.jpg
 *.csv
 *.pth
+*.ipynb
