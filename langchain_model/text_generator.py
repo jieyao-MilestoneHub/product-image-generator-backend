@@ -8,8 +8,8 @@ import openai
 
 # Load environment variables
 load_dotenv()
-claude_api_key = os.getenv("CLAUDE_API_KEY")
-openai_api_key = os.getenv("OPENAI_API_KEY")
+claude_api_key = os.getenv("CLAUDE_API")
+openai_api_key = os.getenv("CLAUDE_API")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
