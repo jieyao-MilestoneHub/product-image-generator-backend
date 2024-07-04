@@ -11,7 +11,8 @@ from typing import Dict, List
 import json
 import pandas as pd
 import io
-from langchain_model.text_generator import AdGenerator
+from openai_model.text_generator import AdGenerator
+from openai_model.image_generator import get_product, get_result
 
 # 配置日誌
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -207,6 +208,10 @@ async def upload_image(product_image: UploadFile = File(...)):
             shutil.copyfileobj(product_image.file, buffer)
 
         logging.info(f"Uploaded image: {timestamp}/upload/{product_image.filename}")
+
+        get_product(upload_path)
+
+        logging.info(f"Preprocess image: {timestamp}/upload/{product_image.filename}")
         return JSONResponse(content={"filename": f"{timestamp}/upload/{product_image.filename}", "timestamp": timestamp})
     except Exception as e:
         logging.error(f"Error uploading image: {str(e)}")
@@ -221,6 +226,10 @@ async def generate_project(
     timestamp: str = Form(...)
 ):
     try:
+        
+        
+        # -------- TODO: get_result -----
+
         ad_generator = AdGenerator()
         short_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="短文")
         long_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="長文")

@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import cv2
+
+import sys
+sys.path.append(r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\openai_model")
 from product_image_processor import ProductImageProcessor
 from image_processor import ImageProcessor
 
@@ -56,14 +59,17 @@ def resize_image(image_path, sizes, output_paths):
         resized_image = resize_and_pad(image, width, height)
         cv2.imwrite(output_path, resized_image)
 
-def main():
-    product_name = "水壺"
-    product_feature = "方便攜帶"
-    gender = "男"
-    age = "25~34"
-    job = "軟體工程師"
-    interest = "運動、健身及休閒娛樂指導員"
+def get_product(product_path):
+    # 處理產品圖像
+    print("處理產品圖像")
+    processor = ProductImageProcessor()
+    mask, image_rgb = processor.segment_product(product_path)
+    result_image = processor.apply_mask(image_rgb, mask)
+    img_name = os.path.base(product_path).split(".")[0]
+    result_image.save(f"./product/{img_name}_transparent.png")
 
+def get_result(product_name, product_feature, gender, age, job, interest, sizes=[(300, 250), (320, 480)]):
+    
     # 建立中文提示
     chinese_prompt = (
         f"為廣告背景打造充滿活力，適合從事{interest}。圖像中但沒有任何動物或品牌標誌。"
@@ -85,16 +91,8 @@ def main():
     # 調整圖像大小並保存到 ./creative/ 目錄
     print("調整圖像大小並保存到 ./creative/ 目錄")
     img_name = os.path.basename(background_path).split(".")[0]
-    sizes = [(300, 250), (320, 480)]
     output_paths = [f"./creative/creative_{img_name}_{sizes[0][0]}x{sizes[0][1]}.png", f"./creative/creative_{img_name}_{sizes[1][0]}x{sizes[1][1]}.png"]
     resize_image(background_path, sizes, output_paths)
-
-    # 處理產品圖像
-    print("處理產品圖像")
-    processor = ProductImageProcessor()
-    mask, image_rgb = processor.segment_product('./product/product_example_01.png')
-    result_image = processor.apply_mask(image_rgb, mask)
-    result_image.save('./product/product_transparent.png')
 
     # 合成最後素材
     print("合成最後素材")
@@ -108,4 +106,14 @@ def main():
         print(f"圖片保存為: {result_path}")
 
 if __name__ == "__main__":
-    main()
+
+    new_product = "product_example_01"
+    get_product(new_product)
+
+    product_name = "水壺"
+    product_feature = "方便攜帶"
+    gender = "男"
+    age = "25~34"
+    job = "軟體工程師"
+    interest = "運動、健身及休閒娛樂指導員"
+    get_result(product_name, product_feature, gender, age, job, interest, new_product)
