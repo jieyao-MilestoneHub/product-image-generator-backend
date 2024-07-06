@@ -11,7 +11,6 @@ from configs import env_path
 # Load environment variables
 load_dotenv(env_path)
 openai_api_key = os.getenv("OPENAI_API")
-openai_api_key = "sk-proj-Y96fccOZLw9kxIsTVhkfT3BlbkFJ1wldH5hzuUy0woFOmPWA"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
