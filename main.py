@@ -11,8 +11,9 @@ from typing import Dict, List
 import json
 import pandas as pd
 import io
-from openai_model.text_generator import AdGenerator
-from openai_model.image_generator import get_product, get_result
+from cv_integration.text_generator import AdGenerator
+from cv_integration.image_generator import get_product, get_result
+from cv_integration.configs import sizes, static_path
 
 # 配置日誌
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -43,13 +44,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MOCK_DYNAMO_DB = {
-    "a": ["1001,2002,3002,4003", "1002,2003,3003,4004"],
-    "b": ["1002,2001,3001,4002"],
-    "c": ["1001,2005,3004,4001", "1001,2002,3005,4005"],
-    "d": ["1002,2004,3002,4003"],
-    "e": ["1001,2003,3003,4004"]
-}
+with open('mock_dynamo_db.json', 'r') as json_file:
+    data = json.load(json_file)
+
+# 將讀取到的數據轉換為字典
+MOCK_DYNAMO_DB = {k: v for k, v in data.items()}
 
 GENDER_TAGS = {
     "1001": "男性",
@@ -64,20 +63,20 @@ AGE_TAGS = {
     "2005": "55+"
 }
 
-OCCUPATION_TAGS = {
-    "3001": "學生",
-    "3002": "軟體工程師",
-    "3003": "醫生",
-    "3004": "教師",
-    "3005": "其他"
-}
+# OCCUPATION_TAGS = {
+#     "3001": "學生",
+#     "3002": "軟體工程師",
+#     "3003": "醫生",
+#     "3004": "教師",
+#     "3005": "其他"
+# }
 
 INTEREST_TAGS = {
-    "4001": "音樂",
-    "4002": "運動",
-    "4003": "旅行",
-    "4004": "閱讀",
-    "4005": "遊戲"
+    "4001": "運動體育",
+    "4002": "寵物生活",
+    "4003": "嬰幼保健",
+    "4004": "動漫電競",
+    "4005": "戶外旅遊"
 }
 
 class AdGenerateRequest(BaseModel):
@@ -94,7 +93,7 @@ class ImageGenerateRequest(BaseModel):
     timestamp: str
 
 # 創建儲存圖片的目錄
-STATIC_DIR = "static"
+STATIC_DIR = static_path
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 # 讀取投放定向選項
@@ -150,7 +149,7 @@ async def upload_audience(file: UploadFile = File(...)):
         # 構建對應結構
         gender_labels = []
         age_labels = []
-        occupation_labels = []
+        # occupation_labels = []
         interest_labels = []
         for index, row in df.iterrows():
             uid = row['uid']
@@ -162,8 +161,8 @@ async def upload_audience(file: UploadFile = File(...)):
                             gender_labels.append(tag)
                         elif tag in AGE_TAGS:
                             age_labels.append(tag)
-                        elif tag in OCCUPATION_TAGS:
-                            occupation_labels.append(tag)
+                        # elif tag in OCCUPATION_TAGS:
+                        #     occupation_labels.append(tag)
                         elif tag in INTEREST_TAGS:
                             interest_labels.append(tag)
         
@@ -176,13 +175,13 @@ async def upload_audience(file: UploadFile = File(...)):
         
         gender_data = count_labels(gender_labels, GENDER_TAGS)
         age_data = count_labels(age_labels, AGE_TAGS)
-        occupation_data = count_labels(occupation_labels, OCCUPATION_TAGS)
+        # occupation_data = count_labels(occupation_labels, OCCUPATION_TAGS)
         interest_data = count_labels(interest_labels, INTEREST_TAGS)
 
         return {
             "gender_data": gender_data,
             "age_data": age_data,
-            "occupation_data": occupation_data,
+            # "occupation_data": occupation_data,
             "interest_data": interest_data
         }
     except Exception as e:
@@ -195,7 +194,7 @@ async def get_target_audiences():
 @app.post("/api/upload-image")
 async def upload_image(product_image: UploadFile = File(...)):
     try:
-        # 清理舊的 upload-only 文件夾
+        # 清理沒再用的資料夾
         cleanup_old_uploads()
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -209,16 +208,17 @@ async def upload_image(product_image: UploadFile = File(...)):
 
         logging.info(f"Uploaded image: {timestamp}/upload/{product_image.filename}")
 
-        get_product(upload_path)
+        # 背景透明化
+        trans_path = get_product(upload_path, STATIC_DIR, timestamp)
 
         logging.info(f"Preprocess image: {timestamp}/upload/{product_image.filename}")
-        return JSONResponse(content={"filename": f"{timestamp}/upload/{product_image.filename}", "timestamp": timestamp})
+        return JSONResponse(content={"filename": f"{timestamp}/upload/{product_image.filename}", "timestamp": timestamp, "trans_path": trans_path})
     except Exception as e:
         logging.error(f"Error uploading image: {str(e)}")
         return JSONResponse(content={"error": "Error uploading image"}, status_code=500)
 
 @app.post("/api/generate-product")
-async def generate_project(
+async def generate_product(
     product_name: str = Form(...),
     product_describe: str = Form(...),
     target_audience: str = Form(...),
@@ -226,10 +226,25 @@ async def generate_project(
     timestamp: str = Form(...)
 ):
     try:
-        
-        
-        # -------- TODO: get_result -----
+        trans_path_prefix = os.path.join(STATIC_DIR, "product_transparent", timestamp)
+        img_product = os.path.basename(product_image_filename).split(".")[0]
+        transparent_path = os.path.join(trans_path_prefix, f"{img_product}_transparent.png")
 
+        if not os.path.exists(transparent_path):
+            logging.error(f"Transparent file {transparent_path} does not exist")
+            raise HTTPException(status_code=400, detail="Transparent image is still processing, please wait")
+
+        # 生成圖片
+        logging.info("生成圖片")
+        audience = target_audience.split(",")
+        gender = audience[0]
+        age = audience[1]
+        job = "no data"
+        interest = audience[2]
+        result_paths = get_result(product_name, product_describe, gender, age, job, interest, transparent_path, sizes=sizes)
+
+        # 生成文字
+        logging.info("生成文字")
         ad_generator = AdGenerator()
         short_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="短文")
         long_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="長文")
@@ -240,23 +255,19 @@ async def generate_project(
         logging.info(f"Received product_image_filename: {product_image_filename}")
         logging.info(f"Received timestamp: {timestamp}")
 
-        upload_path = os.path.join(STATIC_DIR, product_image_filename)
-        if not os.path.exists(upload_path):
-            logging.error(f"Uploaded file {upload_path} does not exist")
-            raise HTTPException(status_code=400, detail="Uploaded file does not exist")
-
         generated_dir = os.path.join(STATIC_DIR, timestamp, "generated")
         os.makedirs(generated_dir, exist_ok=True)
 
         logging.info(generated_dir)
 
-        generated_images = [f"generated_{i}.jpg" for i in range(1, 4)]
-        for image_name in generated_images:
-            generated_path = os.path.join(generated_dir, image_name)
-            shutil.copyfile(upload_path, generated_path)
+        generated_images = []
+        for result_path in result_paths:
+            generated_path = os.path.join(generated_dir, os.path.basename(result_path))
+            shutil.copyfile(result_path, generated_path)
+            generated_images.append(f"{timestamp}/generated/{os.path.basename(result_path)}")
 
-        if not os.path.exists(generated_path):
-            shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
+        if not generated_images:
+            shutil.rmtree(os.path.dirname(transparent_path), ignore_errors=True)
             logging.error(f"Failed to generate images for project {product_name}")
             raise HTTPException(status_code=500, detail="Failed to generate images")
 
@@ -268,7 +279,7 @@ async def generate_project(
             "product_name": product_name,
             "target_audience": target_audience,
             "product_image_filename": product_image_filename,
-            "generated_images": [f"{timestamp}/generated/{img}" for img in generated_images],
+            "generated_images": generated_images,
             "short_ad": short_ad,
             "long_ad": long_ad
         }
@@ -282,8 +293,6 @@ async def generate_project(
         return JSONResponse(content={"error": he.detail}, status_code=he.status_code)
     except Exception as e:
         logging.error(f"Error generating project: {str(e)}")
-        if os.path.exists(upload_path):
-            shutil.rmtree(os.path.dirname(upload_path), ignore_errors=True)
         return JSONResponse(content={"error": "Error generating project"}, status_code=500)
 
 @app.get("/api/history")

@@ -3,6 +3,9 @@ venv/
 *.log
 __pycache__/
 
+parameter/
+states_tf_places2.pth
+
 # 以下三個按照字面意思解讀 (我們使用時間戳記儲存圖片與歷史紀錄)
 static/
 *.png
