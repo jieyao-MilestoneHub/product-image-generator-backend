@@ -8,15 +8,11 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from configs import env_path
 
-# Load environment variables
-load_dotenv(env_path)
-openai_api_key = os.getenv("OPENAI_API")
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Configure OpenAI API key
-openai.api_key = openai_api_key
+# Load environment variables
+load_dotenv(env_path)
+openai.api_key = os.getenv("OPENAI_KEY")
 
 class TextGenerationError(Exception):
     """Custom exception for errors returned by OpenAI API"""

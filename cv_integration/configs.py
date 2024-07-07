@@ -2,7 +2,7 @@ import_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv
 static_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static"
 sizes = [(300, 250), (320, 480), (970, 250)]
 
-env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\.env"
+env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\.env"
 
 # image_generator_test
 product_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_01.png"

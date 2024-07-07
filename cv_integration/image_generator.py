@@ -1,3 +1,4 @@
+import logging
 import openai
 import requests
 from PIL import Image
@@ -8,23 +9,23 @@ from datetime import datetime
 import cv2
 
 import sys
-from configs import import_path, static_path, sizes, product_image_path
+from configs import import_path, env_path, static_path, sizes, product_image_path
 sys.path.append(import_path)
 from product_image_processor import ProductImageProcessor
 from image_processor import ImageProcessor
 from check_product import check_process
 
+logging.basicConfig(level=logging.INFO)
+
 # 加載環境變量
-load_dotenv()
-
-# 設置 OpenAI API 密鑰
-openai.api_key = os.getenv("API_KEY")
-
-if not openai.api_key:
-    raise ValueError("OpenAI API key is not set. Please set the API_KEY environment variable.")
+load_dotenv(env_path)
+openai.api_key = os.getenv("OPENAI_KEY")
 
 # 使用 GPT 模型進行文本翻譯
 def translate_text_gpt(text, model="gpt-3.5-turbo"):
+    if not openai.api_key:
+        raise ValueError("OpenAI API key is not set. Please set the API_KEY environment variable.")
+    
     response = openai.ChatCompletion.create(
         model=model,
         messages=[
@@ -89,7 +90,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
     # 建立中文提示
     chinese_prompt = (
         f"為廣告背景打造充滿活力，適合從事{interest}。圖像中但沒有任何動物或品牌標誌。"
-        f"重點應該是{interest}氛圍且利用三分法則打造{interest}場地，禁止出現{product_name}本身。"
+        f"重點應該是{interest}氛圍且利用三分法則打造{interest}的高質感場地，禁止出現{product_name}本身。"
         f"確保場景適合{age}歲的{gender}性，並且不包含任何特定的文化符號文字。"
         f"此廣告為推廣{product_feature}的{product_name}，可點綴一點與{product_name}相關的元素"
     )
@@ -114,7 +115,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
     # 合成最後素材
     print("合成最後素材")
     result_paths = []
-    for img, scale in zip(output_paths, [0.8, 1.2, 1.0]):
+    for img, scale in zip(output_paths, [(0.8), (1.2), (1.0)]):
         print(f"處理圖片: {background_path}")
         result_path_prefix = os.path.join(static_path, "result")
         result_path = f"{result_path_prefix}/result_{os.path.basename(img)}"
@@ -141,26 +142,3 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
         result_paths.append(result_path)
 
     return result_paths
-
-if __name__ == "__main__":
-
-    # 設置基本信息
-    product_name = "水瓶"
-    product_feature = "方便攜帶"
-    gender = "男性"
-    age = "25-34"
-    job = "軟體工程師"
-    interest = "運動體育"
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # 取得透明化圖片的路徑
-    transparent_path = get_product(product_image_path, static_path, timestamp)
-    
-    # 生成結果
-    result_paths = get_result(product_name, product_feature, gender, age, job, interest, transparent_path, sizes=sizes)
-    
-    # 打印結果路徑
-    print("生成的圖片路徑:")
-    for path in result_paths:
-        print(path)
