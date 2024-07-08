@@ -13,7 +13,7 @@ import pandas as pd
 import io
 from cv_integration.text_generator import AdGenerator
 from cv_integration.image_generator import get_product, get_result
-from cv_integration.configs import sizes, static_path
+from configs import sizes, static_path
 
 # 配置日誌
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

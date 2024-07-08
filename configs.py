@@ -1,6 +1,6 @@
 import_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration"
 static_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static"
-sizes = [(300, 250), (320, 480), (970, 250)]
+sizes = [(300, 250), (320, 480), (336, 280)]
 
 env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\.env"
 

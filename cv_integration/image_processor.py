@@ -8,7 +8,6 @@ class ImageProcessor:
         self.foreground = Image.open(foreground_path).convert("RGBA")
         self.background = Image.open(background_path).convert("RGBA")
 
-    # 檢測清晰且一致的區域
     def detect_clear_and_consistent_areas(self, bg_image, fg_image):
         gray = cv2.cvtColor(bg_image, cv2.COLOR_BGR2GRAY)
         fg_h, fg_w, _ = fg_image.shape
@@ -21,7 +20,6 @@ class ImageProcessor:
         combined_mask = np.logical_and(sharpness_mask, consistency_mask).astype(np.uint8) * 255
         return combined_mask
 
-    # 找到前景圖像的最佳位置
     def _find_best_position(self, fg, bg):
         fg_w, fg_h = fg.size
         bg_w, bg_h = bg.size
@@ -40,7 +38,6 @@ class ImageProcessor:
                     best_position = (x, y)
         return best_position
 
-    # 添加基本陰影
     def add_basic_shadow(self):
         shadow = Image.new("RGBA", self.background.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(shadow)
@@ -51,7 +48,6 @@ class ImageProcessor:
         draw.ellipse(shadow_box, fill=(0, 0, 0, 128))
         self.background = Image.alpha_composite(self.background, shadow)
 
-    # 添加柔化邊緣陰影
     def add_soft_shadow(self):
         shadow = Image.new("RGBA", self.background.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(shadow)
@@ -63,11 +59,17 @@ class ImageProcessor:
         blurred_shadow = shadow.filter(ImageFilter.GaussianBlur(10))
         self.background = Image.alpha_composite(self.background, blurred_shadow)
 
-    # 合成圖像
     def composite_images(self, scale=1.0):
         original_size = self.foreground.size
         new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
         resized_foreground = self.foreground.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # 確保調整後的前景圖像不會超出背景邊界
+        if resized_foreground.width > self.background.width or resized_foreground.height > self.background.height:
+            scale = min(self.background.width / original_size[0], self.background.height / original_size[1])
+            new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
+            resized_foreground = self.foreground.resize(new_size, Image.Resampling.LANCZOS)
+        
         position = self._find_best_position(resized_foreground, self.background)
         mask = resized_foreground.split()[3]
         mask_resized = mask.resize(new_size, Image.Resampling.LANCZOS)
@@ -80,11 +82,21 @@ class ImageProcessor:
             print(f"Applied effect: {chosen_effect.__name__}")
         self.background.paste(resized_foreground, position, mask_resized)
 
-    # 增強前景圖像的飽和度
     def enhance_foreground_saturation(self):
         enhancer = ImageEnhance.Color(self.foreground)
         self.foreground = enhancer.enhance(7)
 
-    # 保存圖像
     def save_image(self, path):
         self.background.save(path)
+
+
+if __name__ == "__main__":
+    foreground_path = "product_example_03.png"
+    background_path = "product_test/background.png"
+    output_path = "output.png"
+
+    processor = ImageProcessor(foreground_path, background_path)
+    processor.enhance_foreground_saturation()
+    processor.composite_images(scale=0.5)
+    processor.save_image(output_path)
+    print(f"Composite image saved to {output_path}")

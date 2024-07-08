@@ -1,61 +1,22 @@
-import logging
-import openai
-import requests
-from PIL import Image
-from io import BytesIO
-from dotenv import load_dotenv
 import os
 from datetime import datetime
 import cv2
+import random
 
 import sys
-from configs import import_path, env_path, static_path, sizes, product_image_path
+from configs import import_path, static_path
 sys.path.append(import_path)
 from product_image_processor import ProductImageProcessor
 from image_processor import ImageProcessor
 from check_product import check_process
 
-logging.basicConfig(level=logging.INFO)
+# 廣告背景需要選擇用 OPENAI 還是用 SDXL1.0 生成
+from openai_generator.openai_generator import translate_text_gpt#, generate_image
+from bedrock.text_to_image import text_to_image_request
 
-# 加載環境變量
-load_dotenv(env_path)
-openai.api_key = os.getenv("OPENAI_KEY")
-
-# 使用 GPT 模型進行文本翻譯
-def translate_text_gpt(text, model="gpt-3.5-turbo"):
-    if not openai.api_key:
-        raise ValueError("OpenAI API key is not set. Please set the API_KEY environment variable.")
-    
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that translates Chinese to English."},
-            {"role": "user", "content": f"Translate the following Chinese text to English accurately and completely:\n\n{text}"}
-        ],
-        max_tokens=200,
-        n=1,
-        temperature=0.5,
-    )
-    translation = response['choices'][0]['message']['content'].strip()
-    return translation
-
-# 使用 OpenAI API 生成圖片
-def generate_image(prompt, size, output_file):
-    response = openai.Image.create(
-        prompt=prompt,
-        n=1,
-        size=size
-    )
-    image_url = response['data'][0]['url']
-
-    # 下載並保存圖片
-    image_response = requests.get(image_url)
-    img = Image.open(BytesIO(image_response.content))
-    img.save(output_file)
-    print(f"圖片已保存為 {output_file}")
 
 # 調整圖片大小
-def resize_and_pad(image, target_width, target_height, background_color=(255, 255, 255)):
+def resize_and_pad(image, target_width, target_height):
     resized_image = cv2.resize(image, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
     return resized_image
 
@@ -87,23 +48,72 @@ def get_product(product_path, static_path, timestamp):
 
 def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, sizes=[(300, 250), (320, 480), (970, 250)]):
     
-    # 建立中文提示
-    chinese_prompt = (
-        f"為廣告背景打造充滿活力，適合從事{interest}。圖像中但沒有任何動物或品牌標誌。"
-        f"重點應該是{interest}氛圍且利用三分法則打造{interest}的高質感場地，禁止出現{product_name}本身。"
-        f"確保場景適合{age}歲的{gender}性，並且不包含任何特定的文化符號文字。"
-        f"此廣告為推廣{product_feature}的{product_name}，可點綴一點與{product_name}相關的元素"
-    )
+    try:
+        # 方法一 - OpenAI
+        # 建立中文提示
+        chinese_prompt = (
+            f"產生簡潔清晰的廣告背景，該背景適合從事{interest}。圖像中但沒有任何動物或品牌標誌。"
+            f"重點應該是{interest}氛圍且利用三分法則打造{interest}的高質感場地，且不包含出現{product_name}本身與相似的物品。"
+            f"確保場景適合{age}歲的{gender}性，且不包含任何特定的文化符號文字。"
+            f"此廣告為推廣{product_feature}的{product_name}。"
+        )
 
-    # 翻譯成英文
-    english_prompt = translate_text_gpt(chinese_prompt)
-    print(f"英文提示: {english_prompt}")
+        # 翻譯成英文
+        english_prompt = translate_text_gpt(chinese_prompt)
+        print(f"英文提示: {english_prompt}")
 
-    # 開始生成圖片並保存到 background/ 目錄
-    print("開始生成圖片並保存到 background/ 目錄")
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    background_path = os.path.join(static_path, "background", f"background_{now}.png")
-    generate_image(english_prompt, size="512x512", output_file=background_path)
+        # 開始生成圖片並保存到 background/ 目錄
+        print("開始生成圖片並保存到 background/ 目錄")
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        background_path = os.path.join(static_path, "background", f"background_{now}.png")
+        generate_image(english_prompt, size="512x512", output_file=background_path)
+
+    except:
+        # 方法二 - Bedrock SDXL1.0
+        # First combination
+        product_name_eng = translate_text_gpt(product_name)
+        product_feature_eng = translate_text_gpt(product_feature)
+        gender_eng = translate_text_gpt(gender)
+        interest_eng = translate_text_gpt(interest)
+        user_age_group = "25-34"
+        information_level = "detailed"
+        content_direction = "healthy living"
+        advertising_material_production_direction = "brand awareness"
+        brightness = "bright"
+        hue = "fresh green"
+        saturation = "vibrant"
+
+        # Second combination
+        # interest = "outdoor travel"
+        # gender = "female"
+        # user_age_group = "35-44"
+        # information_level = "in-depth"
+        # content_direction = "nature conservation"
+        # advertising_material_production_direction = "promoting eco-friendly products"
+        # brightness = "bright"
+        # hue = "forest green"
+        # saturation = "saturated"
+
+        MODEL_ID = "stability.stable-diffusion-xl-v1"
+        # Define the positive prompt
+        POSITIVE_PROMPT = (
+            f"The background of ads Photography of {information_level} where to place ads"
+            f"{interest}, {gender}, {user_age_group}, {content_direction}, {advertising_material_production_direction}, {brightness}, {hue}, {saturation}, "
+            "high resolution, high quality, professional color grading, clear shadows and highlights, atmospheric"
+        )
+
+        # Define the negative prompt
+        NEGATIVE_PROMPT = (
+            "low resolution, bad quality, ugly, blur, mutation, extra arms, extra legs, 3d, painting, "
+            "cannot print any main characters (focus solely on the background), the image should not be overcrowded"
+        )
+
+        # 開始生成圖片並保存到 background/ 目錄 (TODO: 將名稱一個個翻譯至英文)
+        seed = random.randrange(1, 1000000)
+        seed = 8070
+        text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
+
+
 
     # 開始調整圖像大小並保存到 creative/ 目錄
     print("開始調整圖像大小並保存到 creative/ 目錄")

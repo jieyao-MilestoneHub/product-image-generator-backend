@@ -128,7 +128,7 @@ def check_process(target_label, background_path, target_image_path, output_image
 
 if __name__ == "__main__":
     scale=1.2
-    result = check_process(target_label="test_bottle", background_path="test_back", target_image_path="product_test/product_transparent.png", output_image_path="test_result.png", scale=scale)
+    result = check_process(target_label="bottle", background_path="product_test/background.png", target_image_path="product_example_03.png", output_image_path="output_replace.png", scale=scale)
     if result:
         print("處理成功")
     else:

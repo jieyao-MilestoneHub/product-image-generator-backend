@@ -44,3 +44,13 @@ class ProductImageProcessor:
     # 保存圖片
     def save_image(self, image, path):
         image.save(path)
+
+if __name__ == "__main__":
+    image_path = "product_test/product_example_03.png"
+    output_path = "product_example_03.png"
+
+    processor = ProductImageProcessor()
+    mask, image_rgb = processor.segment_product(image_path)
+    masked_image = processor.apply_mask(image_rgb, mask)
+    processor.save_image(masked_image, output_path)
+    print(f"Masked image saved to {output_path}")
