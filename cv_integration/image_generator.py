@@ -1,38 +1,43 @@
 import os
 from datetime import datetime
-import cv2
+import shutil
 import random
-from PIL import Image
+import logging
 
 import sys
-from configs import import_path, static_path, deepfill_model_path
+sys.path.append("./../")
+from configs import import_path, static_path, deepfill_model_path, sizes
 sys.path.append(import_path)
 from product_image_processor import ProductImageProcessor
 
-# 廣告背景需要選擇用 OPENAI 還是用 SDXL1.0 生成
+# Advertisement background generation using SDXL1.0
 from openai_generator.openai_generator import translate_text_gpt
 from bedrock.text_to_image import text_to_image_request
 from mask_cnn_model.putting_product import ImageReplacer
 
+# Configure logging to use the same configuration as the main application
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# 調整圖片大小
-def resize_and_pad(image, target_width, target_height):
-    resized_image = cv2.resize(image, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
-    return resized_image
+    file_handler = logging.FileHandler('app.log', mode='a', encoding='utf-8')
+    file_handler.setFormatter(log_formatter)
+    
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(log_formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
 
-def resize_image(image_path, sizes, output_paths):
-    image = cv2.imread(image_path)
-    for (width, height), output_path in zip(sizes, output_paths):
-        resized_image = resize_and_pad(image, width, height)
-        cv2.imwrite(output_path, resized_image)
-
+# Function to process the product image and make the background transparent
 def get_product(product_path, static_path, timestamp):
     img_product = os.path.basename(product_path).split(".")[0]
     trans_path_prefix = os.path.join(static_path, "product_transparent", timestamp)
     trans_path = os.path.join(trans_path_prefix, f"{img_product}_transparent.png")
 
     if not os.path.exists(trans_path):
-        print("透明化處理中")
+        logging.info("Processing transparency")
         os.makedirs(trans_path_prefix, exist_ok=True)
 
         processor = ProductImageProcessor()
@@ -40,17 +45,19 @@ def get_product(product_path, static_path, timestamp):
         result_image = processor.apply_mask(image_rgb, mask)
         result_image.save(trans_path)
 
-        print("透明化完成")
+        logging.info("Transparency processing complete")
     else:
-        print("透明化已完成")
+        logging.info("Transparency already processed")
 
     return trans_path
 
-def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, sizes=[(300, 250), (320, 480), (970, 250)]):
+# Function to generate the final result images
+def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, timestamp):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    static_path = 'path_to_static'  # 需要替换为实际的静态路径
     background_path = os.path.join(static_path, "background", f"background_{now}.png")
+    result_path_prefix = os.path.join(static_path, timestamp, "generated")
 
+    # Translate text to English using GPT
     product_name_eng = translate_text_gpt(product_name)
     product_feature_eng = translate_text_gpt(product_feature)
     gender_eng = translate_text_gpt(gender)
@@ -64,10 +71,10 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             POSITIVE_PROMPT = (
                 f"ads background for unique {product_name_eng}, ellipse border."
                 f"{product_feature_eng}"
-                f"focus on visually striking, lifelike advertisement scene for {interest_eng}"
+                f"focus on visually striking, lifelike advertisement scene for {interest_eng}."
                 f"targeted at {age}-year-old {gender_eng}. "
-                f"Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements"
-                f"Elegantly incorporate explicit {product_name_eng}, ensuring practical use, while focusing on the container's design and functionality rather than the product itself. "
+                f"Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements."
+                f"Elegantly incorporate {product_name_eng}, ensuring practical use, while focusing on the container's design and functionality rather than the product itself. "
                 f"Design the setting with bold, clear lines and a monochromatic color scheme in the left two-thirds of the image, adding decorative elements at the edges to enhance the visual appeal."
                 f"masterpiece, high resolution, high quality, hdr, fujifilm xt4, 50mm, f/1.6, sharp focus, high detailed."
             )
@@ -79,33 +86,59 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
                 "Exclude painting-like effects to maintain photographic realism. "
                 "Do not include human figures, portraits, or man-made objects. "
                 "Avoid placing any elements in the center of the image."
-                "low resolution, bed quality, ugly, flur, (mutation), extra arms, extra legs, 3d, painting."
+                "low resolution, bed quality, ugly, flur, (mutation), extra arms, extra legs, extra fingers, 3d, painting."
             )
 
             seed = random.randrange(1, 1000000)
             text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
 
+            # 合成圖片
+            os.makedirs('output_test', exist_ok=True)
             replacer = ImageReplacer(deepfill_model_path)
-            result_image = replacer.replace_object(background_path, transparent_path)
 
-            if result_image is not None:
-                img_name = os.path.basename(background_path).split(".")[0]
-                output_path_prefix = os.path.join(static_path, "creative")
-                output_paths = [f"{output_path_prefix}/creative_{img_name}_{width}x{height}.png" for width, height in sizes]
+            img_name = os.path.basename(background_path).split(".")[0]
+            
+            # 設置目標尺寸和對應的縮放比例
+            target_sizes_and_factors = [
+                ((sizes[0][0], sizes[0][1]), 5.0),
+                ((sizes[1][0], sizes[1][1]), 5.0),
+                ((sizes[2][0], sizes[2][1]), 5.0)
+            ]
 
-                for size, output_path in zip(sizes, output_paths):
-                    resized_image = result_image.resize(size, Image.Resampling.LANCZOS)
-                    replacer.save_image(resized_image, output_path)
-                    print(f"Saved resized image to {output_path}")
-                
-                return output_paths
+            output_paths = []
+            for target_size, scale_factor in target_sizes_and_factors:
+                width, height = target_size
+                img_name = f"creative_{img_name}_{width}x{height}.png"
+                output_path = os.path.join(result_path_prefix, img_name)
+                replacer.process_image(background_path, transparent_path, output_path, target_size, scale_factor)
+                logging.info(f"Saved resized image to {output_path}")
+                output_paths.append(os.path.join(timestamp, "generated", img_name))  # 確保後端正確傳遞圖片
 
-            else:
-                raise ValueError("Result image is None.")
+            return output_paths
 
         except Exception as e:
+            clear_folder(result_path_prefix)
             try_time += 1
-            logging.error(f"Attempt {try_time}: Error occurred - {e}")
+            logging.error(f"Attempt {try_time}: Error occurred - {e} (result from produce 'target product')")
 
     logging.error("Max attempts reached. Failed to generate the desired result.")
     return None
+
+def clear_folder(folder_path):
+    # 检查文件夹是否存在
+    if os.path.exists(folder_path):
+        # 遍历文件夹下的所有文件和子文件夹
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)  # 删除文件或符号链接
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)  # 删除子文件夹
+            except Exception as e:
+                print(f'Failed to delete {file_path}. Reason: {e}')
+    else:
+        print(f'Folder {folder_path} does not exist.')
+
+if __name__ == "__main__":
+    get_result(product_name="水壺", product_feature="方便攜帶", gender="男性", age="18~25", job="", interest="運動體育", transparent_path=os.path.join(static_path, r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_02_trans.png"), timestamp="test")

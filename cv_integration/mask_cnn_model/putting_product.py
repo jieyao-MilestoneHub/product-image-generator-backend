@@ -1,25 +1,23 @@
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 import torch
 import torchvision
 from torchvision.models.detection import maskrcnn_resnet50_fpn
 import torchvision.transforms as T
 import os
-
-# Set system paths
 import sys
-sys.path.append("./../../")  # Assuming other necessary modules are located here
+
+# 設定系統路徑
+sys.path.append("./../../")
 from configs import deepfill_model_path, import_path
 sys.path.append(import_path)
 
 class DeepFill:
     def __init__(self, model_path, device=None):
-        if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.device = device
+        self.device = device if device else 'cuda' if torch.cuda.is_available() else 'cpu'
         generator_state_dict = torch.load(model_path, map_location=self.device)['G']
-        if 'stage1.conv1.conv.weight' in generator_state_dict.keys():
+        if 'stage1.conv1.conv.weight' in generator_state_dict:
             from deepfill_v2_model.model.networks import Generator
         else:
             from deepfill_v2_model.model.networks_tf import Generator
@@ -30,219 +28,147 @@ class DeepFill:
     def inpaint(self, image, mask):
         image = T.ToTensor()(image).unsqueeze(0)
         mask = T.ToTensor()(mask).unsqueeze(0)
+        image, mask = self._preprocess_image_and_mask(image, mask)
+        image_masked = image * (1. - mask)
+        x = torch.cat([image_masked, torch.ones_like(image_masked)[:, 0:1, :, :], mask], dim=1)
+        with torch.inference_mode():
+            _, x_stage2 = self.generator(x, mask)
+        image_inpainted = image * (1. - mask) + x_stage2 * mask
+        return self._postprocess_image(image_inpainted)
+
+    def _preprocess_image_and_mask(self, image, mask):
         _, h, w = image.shape[1:]
         grid = 8
         image = image[:, :3, :h // grid * grid, :w // grid * grid]
         mask = mask[:, :1, :h // grid * grid, :w // grid * grid]
         image = (image * 2 - 1.).to(self.device)
-        mask = (mask > 0.5).to(dtype=torch.float32, device=self.device)
-        image_masked = image * (1. - mask)
-        ones_x = torch.ones_like(image_masked)[:, 0:1, :, :]
-        x = torch.cat([image_masked, ones_x, ones_x * mask], dim=1)
-        with torch.inference_mode():
-            _, x_stage2 = self.generator(x, mask)
-        image_inpainted = image * (1. - mask) + x_stage2 * mask
-        img_out = ((image_inpainted[0].permute(1, 2, 0) + 1) * 127.5).to(device='cpu', dtype=torch.uint8)
-        img_out = Image.fromarray(img_out.numpy())
-        return img_out
+        mask = (mask > 0.5).float().to(self.device)
+        return image, mask
+
+    def _postprocess_image(self, image_inpainted):
+        img_out = ((image_inpainted[0].permute(1, 2, 0) + 1) * 127.5).to('cpu', torch.uint8)
+        return Image.fromarray(img_out.numpy())
 
 class ImageReplacer:
     def __init__(self, deepfill_model_path, save_intermediate=False):
-        # 加载 Mask R-CNN 模型
         self.model = maskrcnn_resnet50_fpn(weights=torchvision.models.detection.MaskRCNN_ResNet50_FPN_Weights.DEFAULT)
         self.model.eval()
         self.deepfill = DeepFill(deepfill_model_path)
         self.save_intermediate = save_intermediate
 
-    def get_mask(self, image, score_threshold=0.8):
-        # 将图像转换为张量
-        transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor()
-        ])
-        image_rgb = image.convert("RGB")  # 确保图像是 RGB 格式
-        image_tensor = transform(image_rgb)
-        with torch.no_grad():
-            prediction = self.model([image_tensor])
-        masks = prediction[0]['masks']
-        scores = prediction[0]['scores']
-
-        # 选择高于阈值的最高置信度的掩码
-        if len(scores) > 0:
-            best_score_idx = scores.argmax()
-            if scores[best_score_idx] >= score_threshold:
-                best_mask = masks[best_score_idx].squeeze().numpy()
-                return best_mask
-        return None
-
-    def refine_mask(self, mask):
-        # 转换为二值图像
-        mask = (mask * 255).astype(np.uint8)
-        _, binary_mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-        # 应用形态学操作（腐蚀然后膨胀）
-        kernel = np.ones((5, 5), np.uint8)
-        refined_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-
-        # 返回浮点型掩码
-        return refined_mask / 255.0
-
-    def replace_object(self, base_image_path, overlay_image_path):
-        # 读取图像
+    def process_image(self, base_image_path, overlay_image_path, output_path, target_size, scale_factor):
         base_image = Image.open(base_image_path).convert("RGBA")
         overlay_image = Image.open(overlay_image_path).convert("RGBA")
 
-        # 获取图像 B 中的物体掩码
-        base_mask = self.get_mask(base_image)
+        scaled_base_image = base_image.resize(target_size, Image.Resampling.LANCZOS)
+        self.replace_object(scaled_base_image, overlay_image, output_path, scale_factor)
+
+    def replace_object(self, base_image, overlay_image, output_path, scale_factor):
+        base_mask = self.refine_mask(self.get_mask(base_image))
         if base_mask is None:
-            print("未能检测到物体")
-            return None
-        base_mask = self.refine_mask(base_mask)
+            print("No object detected to replace.")
+            return
 
-        # 获取图像 A 中的物体掩码
-        overlay_mask = self.get_mask(overlay_image)
-        if overlay_mask is None:
-            print("未能检测到覆盖物体")
-            return None
-        overlay_mask = self.refine_mask(overlay_mask)
+        inpainted_image = self.deepfill.inpaint(base_image, Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L"))
+        transformed_overlay_image, mask_bounds = self.adjust_overlay_size(overlay_image, base_mask, scale_factor)
 
-        # 计算放置位置
-        base_width, base_height = base_image.size
-        overlay_width, overlay_height = overlay_image.size
+        result_image = self.merge_images(base_image, transformed_overlay_image, inpainted_image, mask_bounds)
+        result_image.save(output_path)
+        print(f"Image processed and saved to {output_path}")
 
-        # 获取目标位置
-        base_mask_indices = np.column_stack(np.where(base_mask > 0))
-        overlay_mask_indices = np.column_stack(np.where(overlay_mask > 0))
+    def get_mask(self, image, score_threshold=0.8):
+        transform = T.Compose([T.ToTensor()])
+        image_tensor = transform(image.convert("RGB"))
+        with torch.no_grad():
+            prediction = self.model([image_tensor])
+        masks, scores = prediction[0]['masks'], prediction[0]['scores']
+        if len(scores) > 0 and scores.max() >= score_threshold:
+            return masks[scores.argmax()].squeeze().numpy()
+        return None
 
-        if base_mask_indices.size == 0 or overlay_mask_indices.size == 0:
-            print("无法检测到有效的掩码区域")
-            return None
+    def refine_mask(self, mask):
+        mask = (mask * 255).astype(np.uint8)
+        _, binary_mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+        kernel = np.ones((5, 5), np.uint8)
+        return cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel) / 255.0
 
-        # 计算透视变换矩阵
-        base_pts = np.float32([
-            [base_mask_indices[:, 1].min(), base_mask_indices[:, 0].min()],
-            [base_mask_indices[:, 1].max(), base_mask_indices[:, 0].min()],
-            [base_mask_indices[:, 1].max(), base_mask_indices[:, 0].max()],
-            [base_mask_indices[:, 1].min(), base_mask_indices[:, 0].max()]
-        ])
+    def adjust_overlay_size(self, overlay_image, base_mask, scale_factor):
+        # 计算遮罩的边界框
+        mask_indices = np.column_stack(np.where(base_mask > 0))
+        min_y, min_x = mask_indices.min(axis=0)
+        max_y, max_x = mask_indices.max(axis=0)
+        mask_width = max_x - min_x
+        mask_height = max_y - min_y
 
-        overlay_pts = np.float32([
-            [overlay_mask_indices[:, 1].min(), overlay_mask_indices[:, 0].min()],
-            [overlay_mask_indices[:, 1].max(), overlay_mask_indices[:, 0].min()],
-            [overlay_mask_indices[:, 1].max(), overlay_mask_indices[:, 0].max()],
-            [overlay_mask_indices[:, 1].min(), overlay_mask_indices[:, 0].max()]
-        ])
+        # 计算目标物C的缩放比例
+        overlay_ratio = overlay_image.width / overlay_image.height
+        new_width = int(mask_width * scale_factor)
+        new_height = int(new_width / overlay_ratio)
 
-        M = cv2.getPerspectiveTransform(overlay_pts, base_pts)
+        # 确保新高度不超过遮罩的1.5倍
+        max_height = int(mask_height * 1.2)
+        if new_height > max_height:
+            new_height = max_height
+            new_width = int(new_height * overlay_ratio)
 
-        # 透视变换覆盖图像（包括透明度通道）
-        overlay_image_np = np.array(overlay_image)
-        overlay_image_transformed = cv2.warpPerspective(
-            overlay_image_np, M, (base_width, base_height), borderMode=cv2.BORDER_TRANSPARENT)
+        overlay_resized = overlay_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        return overlay_resized, (min_x, min_y, max_x, max_y)
 
-        # 创建遮罩
-        overlay_mask_transformed = cv2.warpPerspective(
-            overlay_mask, M, (base_width, base_height), borderMode=cv2.BORDER_TRANSPARENT)
-
-        # 准备修补图像和透明背景的白色遮罩
+    def merge_images(self, base_image, overlay_image, inpainted_image, mask_bounds):
+        min_x, min_y, max_x, max_y = mask_bounds
         base_image_np = np.array(base_image)
-        inpaint_image_np = base_image_np.copy()
-        inpaint_image_np[overlay_mask_transformed > 0] = [255, 255, 255, 255]  # 将遮罩区域设为白色
+        overlay_np = np.array(overlay_image.convert("RGBA"))
+        inpainted_np = np.array(inpainted_image.convert("RGBA"))
 
-        inpaint_image_pil = Image.fromarray(inpaint_image_np)
-        overlay_mask_pil = Image.fromarray((overlay_mask_transformed * 255).astype(np.uint8)).convert("L")
+        # 计算放置位置，使目标物C底部与遮罩底部对齐，并水平居中
+        overlay_position_y = max_y - overlay_image.height
+        overlay_position_x = min_x + (max_x - min_x - overlay_image.width) // 2
 
-        # 保存遮罩和修补图像（仅在 save_intermediate 为 True 时保存）
-        if self.save_intermediate:
-            mask_output_path = os.path.join('mask', f'{os.path.basename(base_image_path)}_mask.png')
-            inpaint_output_path = os.path.join('masked', f'{os.path.basename(base_image_path)}_masked.png')
-            overlay_mask_pil.save(mask_output_path)
-            inpaint_image_pil.save(inpaint_output_path)
+        # 保持透明背景
+        combined_np = inpainted_np.copy()
 
-        # 使用 DeepFill 修补目标区域
-        inpainted_image = self.deepfill.inpaint(inpaint_image_pil, overlay_mask_pil)
+        # 确保目标物C可以超出遮罩范围
+        overlay_top_y = overlay_position_y
+        overlay_bottom_y = overlay_position_y + overlay_np.shape[0]
+        overlay_left_x = overlay_position_x
+        overlay_right_x = overlay_position_x + overlay_np.shape[1]
 
-        # 将 overlay 图像的 alpha 通道分离出来
-        alpha_channel = overlay_image_transformed[:, :, 3] / 255.0
-        overlay_rgb = overlay_image_transformed[:, :, :3]
+        combined_top_y = max(0, overlay_top_y)
+        combined_bottom_y = min(combined_np.shape[0], overlay_bottom_y)
+        combined_left_x = max(0, overlay_left_x)
+        combined_right_x = min(combined_np.shape[1], overlay_right_x)
 
-        # 将修补后的图像和 overlay 图像进行融合
-        inpainted_image_np = np.array(inpainted_image)
-        inpainted_rgb = inpainted_image_np[:, :, :3]
-        # 确保修补后的图像具有 alpha 通道
-        inpainted_alpha = np.ones((inpainted_rgb.shape[0], inpainted_rgb.shape[1]))
+        for y in range(combined_top_y, combined_bottom_y):
+            for x in range(combined_left_x, combined_right_x):
+                oy = y - overlay_position_y
+                ox = x - overlay_position_x
+                if overlay_np[oy, ox, 3] > 0:  # 只复制非透明部分
+                    combined_np[y, x] = overlay_np[oy, ox]
 
-        combined_rgb = (overlay_rgb * alpha_channel[..., None] + inpainted_rgb * (1 - alpha_channel[..., None])).astype(np.uint8)
-        combined_alpha = (alpha_channel + inpainted_alpha * (1 - alpha_channel)).astype(np.uint8) * 255
+        # 将合并后的图像转换为PIL图像
+        combined_image = Image.fromarray(combined_np, "RGBA")
 
-        combined_image_np = np.dstack([combined_rgb, combined_alpha])
+        # 应用高斯模糊来平滑边缘
+        alpha = combined_image.split()[-1]
+        alpha_blurred = alpha.filter(ImageFilter.GaussianBlur(radius=2))
+        combined_image.putalpha(alpha_blurred)
 
-        # 返回最终结果图像
-        result_image = Image.fromarray(combined_image_np, "RGBA")
-        return result_image
-
-    def save_image(self, image, path):
-        image.save(path)
-
-def resize_and_pad(image, target_width, target_height, pad_color=(0, 0, 0)):
-    """
-    Resize and pad an image to the target width and height.
-
-    Parameters:
-    - image: Input image as a numpy array.
-    - target_width: Desired width of the output image.
-    - target_height: Desired height of the output image.
-    - pad_color: Color to use for padding (default is black).
-
-    Returns:
-    - new_image: The resized and padded image as a numpy array.
-    """
-    original_height, original_width = image.shape[:2]
-    original_channels = image.shape[2] if len(image.shape) > 2 else 1
-
-    # Calculate scaling factor to fit image within target dimensions
-    scale = min(target_width / original_width, target_height / original_height)
-    new_width = int(original_width * scale)
-    new_height = int(original_height * scale)
-
-    # Resize the image with high quality
-    resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-
-    # Calculate padding
-    delta_w = target_width - new_width
-    delta_h = target_height - new_height
-    top, bottom = delta_h // 2, delta_h - (delta_h // 2)
-    left, right = delta_w // 2, delta_w - (delta_w // 2)
-
-    # Pad the image with the specified color
-    if original_channels == 1:  # Grayscale image
-        pad_color = pad_color[0]  # Use a single value for grayscale padding
-    new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=pad_color)
-
-    return new_image
+        return combined_image
 
 if __name__ == "__main__":
-    # 创建保存目录
-    os.makedirs('mask', exist_ok=True)
-    os.makedirs('masked', exist_ok=True)
-    os.makedirs('inpainted', exist_ok=True)
-    os.makedirs('test_image_result', exist_ok=True)
-
+    # Setup directories and paths
+    os.makedirs('output_test', exist_ok=True)
     replacer = ImageReplacer(deepfill_model_path)
 
-    base_image_path = r"C:\Users\USER\Desktop\Develop\sd_sagemaker\content\generated_images\text-image\generated_image_20240710143809.png"
+    base_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\mask_cnn_model\test_image\travel_3.png"
     overlay_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_02_trans.png"
-    
-    # 处理图像
-    result_image = replacer.replace_object(base_image_path, overlay_image_path)
-    if result_image is not None:
-        output_paths = [
-            "test_image_result/replaced_300x250.png",
-            "test_image_result/replaced_320x480.png",
-            "test_image_result/replaced_336x280.png"
-        ]
-        sizes = [(300, 250), (320, 480), (336, 280)]
 
-        for size, output_path in zip(sizes, output_paths):
-            resized_image = result_image.resize(size, Image.Resampling.LANCZOS)
-            replacer.save_image(resized_image, output_path)
-            print(f"Saved resized image to {output_path}")
+    # 設置目標尺寸、對應的縮放比例和輸出路徑
+    target_sizes_and_factors = [
+        ((300, 250), 7.0, 'output_test/replaced_300x250.png'),
+        ((320, 480), 7.0, 'output_test/replaced_320x480.png'),
+        ((336, 280), 7.0, 'output_test/replaced_336x280.png')
+    ]
+
+    for target_size, scale_factor, output_path in target_sizes_and_factors:
+        replacer.process_image(base_image_path, overlay_image_path, output_path, target_size, scale_factor)

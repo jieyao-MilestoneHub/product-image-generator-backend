@@ -13,9 +13,9 @@ import pandas as pd
 import io
 from cv_integration.text_generator import AdGenerator
 from cv_integration.image_generator import get_product, get_result
-from configs import sizes, static_path
+from configs import static_path
 
-# 配置日誌
+# Configure logging
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 file_handler = logging.FileHandler('app.log', mode='a', encoding='utf-8')
@@ -29,9 +29,12 @@ app_logger.setLevel(logging.INFO)
 app_logger.addHandler(file_handler)
 app_logger.addHandler(stream_handler)
 
+# Ensure that imported modules use the same logging configuration
+logging.basicConfig(level=logging.INFO, handlers=[file_handler, stream_handler])
+
 app = FastAPI()
 
-# 允許的前端URL
+# Allowed frontend URLs
 origins = [
     "http://localhost:3000",
 ]
@@ -47,7 +50,7 @@ app.add_middleware(
 with open('mock_dynamo_db.json', 'r') as json_file:
     data = json.load(json_file)
 
-# 將讀取到的數據轉換為字典
+# Convert the read data into a dictionary
 MOCK_DYNAMO_DB = {k: v for k, v in data.items()}
 
 GENDER_TAGS = {
@@ -92,18 +95,18 @@ class ImageGenerateRequest(BaseModel):
     product_image_filename: str
     timestamp: str
 
-# 創建儲存圖片的目錄
+# Create directory to store images
 STATIC_DIR = static_path
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# 讀取投放定向選項
+# Load targeting options
 def load_target_audiences() -> Dict[str, str]:
     with open("target_audiences.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
 TARGET_AUDIENCES = load_target_audiences()
 
-# 保存歷史紀錄到JSON
+# Save project information to JSON
 def save_project_info(project_info: Dict):
     filename = os.path.join(STATIC_DIR, "history_setting.json")
     try:
@@ -127,7 +130,7 @@ def save_project_info(project_info: Dict):
         logging.error(f"Unexpected error saving project info: {str(e)}")
         raise HTTPException(status_code=500, detail="Error saving project info: Unexpected error")
 
-# 刪除只有 upload 目錄的時間戳記文件夾
+# Delete folders that only have upload timestamp
 def cleanup_old_uploads():
     for folder_name in os.listdir(STATIC_DIR):
         folder_path = os.path.join(STATIC_DIR, folder_name)
@@ -138,15 +141,15 @@ def cleanup_old_uploads():
                 shutil.rmtree(folder_path)
                 logging.info(f"Deleted old upload-only directory: {folder_path}")
 
-# 上傳CSV並傳回標籤分析結果
+# Upload CSV and return label analysis results
 @app.post("/api/upload-audience")
 async def upload_audience(file: UploadFile = File(...)):
     try:
-        # 讀取 CSV 文件
+        # Read CSV file
         contents = await file.read()
         df = pd.read_csv(io.BytesIO(contents))
         
-        # 構建對應結構
+        # Build corresponding structure
         gender_labels = []
         age_labels = []
         # occupation_labels = []
@@ -166,7 +169,7 @@ async def upload_audience(file: UploadFile = File(...)):
                         elif tag in INTEREST_TAGS:
                             interest_labels.append(tag)
         
-        # 統計每個標籤出現次數
+        # Count occurrences of each label
         def count_labels(label_list, tags_dict):
             label_counts = {name: 0 for name in tags_dict.values()}
             for tag in label_list:
@@ -185,6 +188,7 @@ async def upload_audience(file: UploadFile = File(...)):
             "interest_data": interest_data
         }
     except Exception as e:
+        logging.error(f"Error processing audience upload: {str(e)}")
         return {"error": str(e)}
 
 @app.get("/api/target-audiences")
@@ -194,7 +198,7 @@ async def get_target_audiences():
 @app.post("/api/upload-image")
 async def upload_image(product_image: UploadFile = File(...)):
     try:
-        # 清理沒再用的資料夾
+        # Clean up unused directories
         cleanup_old_uploads()
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -202,13 +206,13 @@ async def upload_image(product_image: UploadFile = File(...)):
         os.makedirs(upload_dir, exist_ok=True)
         upload_path = os.path.join(upload_dir, product_image.filename)
 
-        # 保存上傳的圖片
+        # Save uploaded image
         with open(upload_path, "wb") as buffer:
             shutil.copyfileobj(product_image.file, buffer)
 
         logging.info(f"Uploaded image: {timestamp}/upload/{product_image.filename}")
 
-        # 背景透明化
+        # Make background transparent
         trans_path = get_product(upload_path, STATIC_DIR, timestamp)
 
         logging.info(f"Preprocess image: {timestamp}/upload/{product_image.filename}")
@@ -234,17 +238,22 @@ async def generate_product(
             logging.error(f"Transparent file {transparent_path} does not exist")
             raise HTTPException(status_code=400, detail="Transparent image is still processing, please wait")
 
-        # 生成圖片
-        logging.info("生成圖片")
+        # Generate images
+        generated_dir = os.path.join(STATIC_DIR, timestamp, "generated")
+        os.makedirs(generated_dir, exist_ok=True)
+        logging.info("Generating images")
         audience = target_audience.split(",")
         gender = audience[0]
         age = audience[1]
         job = "no data"
         interest = audience[2]
-        result_paths = get_result(product_name, product_describe, gender, age, job, interest, transparent_path, sizes=sizes)
+        generated_images = get_result(product_name, product_describe, gender, age, job, interest, transparent_path, timestamp=timestamp)
 
-        # 生成文字
-        logging.info("生成文字")
+        if not generated_images:
+            return JSONResponse(content={"error": "get_result() got the problem"}, status_code=404)
+
+        # Generate text
+        logging.info("Generating text")
         ad_generator = AdGenerator()
         short_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="短文")
         long_ad = ad_generator.generate_ad_copy(product_name, product_describe, target_audience, length="長文")
@@ -254,24 +263,6 @@ async def generate_product(
         logging.info(f"Received target_audience: {target_audience}")
         logging.info(f"Received product_image_filename: {product_image_filename}")
         logging.info(f"Received timestamp: {timestamp}")
-
-        generated_dir = os.path.join(STATIC_DIR, timestamp, "generated")
-        os.makedirs(generated_dir, exist_ok=True)
-
-        logging.info(generated_dir)
-
-        generated_images = []
-        for result_path in result_paths:
-            generated_path = os.path.join(generated_dir, os.path.basename(result_path))
-            shutil.copyfile(result_path, generated_path)
-            generated_images.append(f"{timestamp}/generated/{os.path.basename(result_path)}")
-
-        if not generated_images:
-            shutil.rmtree(os.path.dirname(transparent_path), ignore_errors=True)
-            logging.error(f"Failed to generate images for project {product_name}")
-            raise HTTPException(status_code=500, detail="Failed to generate images")
-
-        logging.info(f"Generated images for project {product_name}, target audience: {target_audience}")
 
         project_info = {
             "write_date": timestamp,
@@ -305,8 +296,7 @@ async def get_history():
     else:
         return JSONResponse(content=[], status_code=200)
     
-
-# 提供靜態文件的服務
+# Serve static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 if __name__ == "__main__":
