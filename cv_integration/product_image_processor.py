@@ -3,6 +3,9 @@ import numpy as np
 from PIL import Image
 from segment_anything import sam_model_registry, SamPredictor
 import torch
+
+import sys
+sys.path.append("./../")
 from configs import model_type, checkpoint_path
 
 class ProductImageProcessor:
@@ -46,8 +49,8 @@ class ProductImageProcessor:
         image.save(path)
 
 if __name__ == "__main__":
-    image_path = "product_test/product_example_03.png"
-    output_path = "product_example_03.png"
+    image_path = "product_test/product_example_02.png"
+    output_path = "product_test/product_example_02_trans.png"
 
     processor = ProductImageProcessor()
     mask, image_rgb = processor.segment_product(image_path)

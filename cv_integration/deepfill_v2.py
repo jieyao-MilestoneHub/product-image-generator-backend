@@ -2,17 +2,21 @@ import torch
 import torchvision.transforms as T
 from PIL import Image
 
+import sys
+sys.path.append("./../")
+from configs import deepfill_model_path
+
 class DeepFill:
     def __init__(self, model_path, device=None):
-        # 检查设备，如果未指定设备，默认使用CUDA，如果不可用则使用CPU
+        
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
 
-        # 加载模型状态字典
+        # 載入模型狀態字典
         generator_state_dict = torch.load(model_path, map_location=self.device)['G']
         
-        # 检查权重文件格式，选择相应的网络定义文件
+        # 檢察權重文件格式，選擇對應的網路文件
         if 'stage1.conv1.conv.weight' in generator_state_dict.keys():
             from deepfill_v2_model.model.networks import Generator
         else:
@@ -24,11 +28,11 @@ class DeepFill:
         self.generator.eval()
 
     def inpaint(self, image_path, mask_path, output_path):
-        # 加载图像和掩码
+        # 載入圖像及遮罩
         image = Image.open(image_path)
         mask = Image.open(mask_path)
 
-        # 转换为张量
+        # 轉換為張量
         image = T.ToTensor()(image)
         mask = T.ToTensor()(mask)
 
@@ -40,21 +44,21 @@ class DeepFill:
 
         print(f"Shape of image: {image.shape}")
 
-        image = (image * 2 - 1.).to(self.device)  # 将图像值映射到 [-1, 1] 范围
-        mask = (mask > 0.5).to(dtype=torch.float32, device=self.device)  # 1.: 被掩盖的，0.: 未掩盖的
+        image = (image * 2 - 1.).to(self.device)  # 將圖像映射到 [-1, 1]
+        mask = (mask > 0.5).to(dtype=torch.float32, device=self.device)  # 1.: 有遮罩，0.: 無遮罩
 
         image_masked = image * (1. - mask)  # 掩盖图像
 
         ones_x = torch.ones_like(image_masked)[:, 0:1, :, :]
-        x = torch.cat([image_masked, ones_x, ones_x * mask], dim=1)  # 连接通道
+        x = torch.cat([image_masked, ones_x, ones_x * mask], dim=1)  # 連接通道
 
         with torch.inference_mode():
             _, x_stage2 = self.generator(x, mask)
 
-        # 完成图像
+        # 完成圖像
         image_inpainted = image * (1. - mask) + x_stage2 * mask
 
-        # 保存修复后的图像
+        # 儲存修復後的圖像
         img_out = ((image_inpainted[0].permute(1, 2, 0) + 1) * 127.5).to(device='cpu', dtype=torch.uint8)
         img_out = Image.fromarray(img_out.numpy())
         img_out.save(output_path)
@@ -63,15 +67,13 @@ class DeepFill:
 
 if __name__ == '__main__':
 
-    model_path = 'deepfill_v2_model/pretrained/states_tf_places2.pth'
+    # 載入DeepFill
+    deepfill = DeepFill(deepfill_model_path)
 
-    # 加载DeepFill模型
-    deepfill = DeepFill(model_path)
+    # 測試圖像及遮罩
+    image_path = r'C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\segment_anything_model\composited_image.png'
+    mask_path = r'C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\segment_anything_model\transparent_composite_image.png'
+    output_path = 'case_out_test.png'
 
-    # 加载测试图像和掩码
-    image_path = 'deepfill_v2_model/examples/inpaint/case1.png'
-    mask_path = 'deepfill_v2_model/examples/inpaint/case1_mask.png'
-    output_path = 'case1_out_test.png'
-
-    # 进行图像修复
+    # 進行圖像修補
     deepfill.inpaint(image_path, mask_path, output_path)

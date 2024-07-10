@@ -113,7 +113,7 @@ def text_to_image_request(model_id, positive_prompt, negative_prompt, seed, gene
         "samples": 1,
         "seed": seed,
         "steps": 25,
-        "style_preset": "fantasy-art"
+        "style_preset": "photographic"
     })
 
     # Generate and save image

@@ -2,17 +2,17 @@ import os
 from datetime import datetime
 import cv2
 import random
+from PIL import Image
 
 import sys
-from configs import import_path, static_path
+from configs import import_path, static_path, deepfill_model_path
 sys.path.append(import_path)
 from product_image_processor import ProductImageProcessor
-from image_processor import ImageProcessor
-from check_product import check_process
 
 # 廣告背景需要選擇用 OPENAI 還是用 SDXL1.0 生成
-from openai_generator.openai_generator import translate_text_gpt#, generate_image
+from openai_generator.openai_generator import translate_text_gpt
 from bedrock.text_to_image import text_to_image_request
+from mask_cnn_model.putting_product import ImageReplacer
 
 
 # 調整圖片大小
@@ -47,108 +47,65 @@ def get_product(product_path, static_path, timestamp):
     return trans_path
 
 def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, sizes=[(300, 250), (320, 480), (970, 250)]):
-    
-    try:
-        # 方法一 - OpenAI
-        # 建立中文提示
-        chinese_prompt = (
-            f"產生簡潔清晰的廣告背景，該背景適合從事{interest}。圖像中但沒有任何動物或品牌標誌。"
-            f"重點應該是{interest}氛圍且利用三分法則打造{interest}的高質感場地，且不包含出現{product_name}本身與相似的物品。"
-            f"確保場景適合{age}歲的{gender}性，且不包含任何特定的文化符號文字。"
-            f"此廣告為推廣{product_feature}的{product_name}。"
-        )
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    static_path = 'path_to_static'  # 需要替换为实际的静态路径
+    background_path = os.path.join(static_path, "background", f"background_{now}.png")
 
-        # 翻譯成英文
-        english_prompt = translate_text_gpt(chinese_prompt)
-        print(f"英文提示: {english_prompt}")
+    product_name_eng = translate_text_gpt(product_name)
+    product_feature_eng = translate_text_gpt(product_feature)
+    gender_eng = translate_text_gpt(gender)
+    interest_eng = translate_text_gpt(interest)
+    try_time = 0
 
-        # 開始生成圖片並保存到 background/ 目錄
-        print("開始生成圖片並保存到 background/ 目錄")
-        now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        background_path = os.path.join(static_path, "background", f"background_{now}.png")
-        generate_image(english_prompt, size="512x512", output_file=background_path)
+    while try_time < 5:
+        try:
+            MODEL_ID = "stability.stable-diffusion-xl-v1"
 
-    except:
-        # 方法二 - Bedrock SDXL1.0
-        # First combination
-        product_name_eng = translate_text_gpt(product_name)
-        product_feature_eng = translate_text_gpt(product_feature)
-        gender_eng = translate_text_gpt(gender)
-        interest_eng = translate_text_gpt(interest)
-        user_age_group = "25-34"
-        information_level = "detailed"
-        content_direction = "healthy living"
-        advertising_material_production_direction = "brand awareness"
-        brightness = "bright"
-        hue = "fresh green"
-        saturation = "vibrant"
+            POSITIVE_PROMPT = (
+                f"ads background for unique {product_name_eng}, ellipse border."
+                f"{product_feature_eng}"
+                f"focus on visually striking, lifelike advertisement scene for {interest_eng}"
+                f"targeted at {age}-year-old {gender_eng}. "
+                f"Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements"
+                f"Elegantly incorporate explicit {product_name_eng}, ensuring practical use, while focusing on the container's design and functionality rather than the product itself. "
+                f"Design the setting with bold, clear lines and a monochromatic color scheme in the left two-thirds of the image, adding decorative elements at the edges to enhance the visual appeal."
+                f"masterpiece, high resolution, high quality, hdr, fujifilm xt4, 50mm, f/1.6, sharp focus, high detailed."
+            )
 
-        # Second combination
-        # interest = "outdoor travel"
-        # gender = "female"
-        # user_age_group = "35-44"
-        # information_level = "in-depth"
-        # content_direction = "nature conservation"
-        # advertising_material_production_direction = "promoting eco-friendly products"
-        # brightness = "bright"
-        # hue = "forest green"
-        # saturation = "saturated"
+            NEGATIVE_PROMPT = (
+                f"Do not block {product_name_eng} for any element in image."
+                "No human figures, animals, brand logos, or man-made objects should be visible. "
+                "Avoid low resolution, blurring, and any distortions to ensure clarity and photographic realism. "
+                "Exclude painting-like effects to maintain photographic realism. "
+                "Do not include human figures, portraits, or man-made objects. "
+                "Avoid placing any elements in the center of the image."
+                "low resolution, bed quality, ugly, flur, (mutation), extra arms, extra legs, 3d, painting."
+            )
 
-        MODEL_ID = "stability.stable-diffusion-xl-v1"
-        # Define the positive prompt
-        POSITIVE_PROMPT = (
-            f"The background of ads Photography of {information_level} where to place ads"
-            f"{interest}, {gender}, {user_age_group}, {content_direction}, {advertising_material_production_direction}, {brightness}, {hue}, {saturation}, "
-            "high resolution, high quality, professional color grading, clear shadows and highlights, atmospheric"
-        )
+            seed = random.randrange(1, 1000000)
+            text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
 
-        # Define the negative prompt
-        NEGATIVE_PROMPT = (
-            "low resolution, bad quality, ugly, blur, mutation, extra arms, extra legs, 3d, painting, "
-            "cannot print any main characters (focus solely on the background), the image should not be overcrowded"
-        )
+            replacer = ImageReplacer(deepfill_model_path)
+            result_image = replacer.replace_object(background_path, transparent_path)
 
-        # 開始生成圖片並保存到 background/ 目錄 (TODO: 將名稱一個個翻譯至英文)
-        seed = random.randrange(1, 1000000)
-        seed = 8070
-        text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
+            if result_image is not None:
+                img_name = os.path.basename(background_path).split(".")[0]
+                output_path_prefix = os.path.join(static_path, "creative")
+                output_paths = [f"{output_path_prefix}/creative_{img_name}_{width}x{height}.png" for width, height in sizes]
 
+                for size, output_path in zip(sizes, output_paths):
+                    resized_image = result_image.resize(size, Image.Resampling.LANCZOS)
+                    replacer.save_image(resized_image, output_path)
+                    print(f"Saved resized image to {output_path}")
+                
+                return output_paths
 
+            else:
+                raise ValueError("Result image is None.")
 
-    # 開始調整圖像大小並保存到 creative/ 目錄
-    print("開始調整圖像大小並保存到 creative/ 目錄")
-    img_name = os.path.basename(background_path).split(".")[0]
-    output_path_prefix = os.path.join(static_path, "creative")
-    output_paths = [f"{output_path_prefix}/creative_{img_name}_{width}x{height}.png" for width, height in sizes]
-    resize_image(background_path, sizes, output_paths)
+        except Exception as e:
+            try_time += 1
+            logging.error(f"Attempt {try_time}: Error occurred - {e}")
 
-    # 合成最後素材
-    print("合成最後素材")
-    result_paths = []
-    for img, scale in zip(output_paths, [(0.8), (1.2), (1.0)]):
-        print(f"處理圖片: {background_path}")
-        result_path_prefix = os.path.join(static_path, "result")
-        result_path = f"{result_path_prefix}/result_{os.path.basename(img)}"
-        
-        # 若圖片中包含產品，則利用產品取代之 (例如 water bottle → water, bottle)
-        product_name_english = translate_text_gpt(product_name)
-        prossible_object = product_name_english.split(" ")
-        for keyword in prossible_object:
-            result = check_process(target_label=keyword, background_path=img, target_image_path=transparent_path, output_image_path=result_path, scale=scale*1.2)
-            if result:
-                break
-
-        # 若圖片中未包含產品，則找最佳位置放置
-        if result:
-            print("圖片中包含產品，且處理完成。")
-        else:
-            print("圖片中未包含產品，正在處理。")
-            processor = ImageProcessor(transparent_path, img)
-            processor.composite_images(scale=scale)
-            processor.enhance_foreground_saturation()
-            processor.save_image(result_path)
-            print(f"圖片保存為: {result_path}")
-
-        result_paths.append(result_path)
-
-    return result_paths
+    logging.error("Max attempts reached. Failed to generate the desired result.")
+    return None
