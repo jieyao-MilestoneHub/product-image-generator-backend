@@ -105,14 +105,14 @@ def text_to_image_request(model_id, positive_prompt, negative_prompt, seed, gene
             {"text": positive_prompt, "weight": 1},
             {"text": negative_prompt, "weight": -1}
         ],
-        "height": 512,
-        "width": 512,
+        "height": 1024,
+        "width": 1024,
         "cfg_scale": 12,
-        "clip_guidance_preset": "NONE",
+        "clip_guidance_preset": "SLOW",
         "sampler": "K_DPMPP_2M",
         "samples": 1,
         "seed": seed,
-        "steps": 25,
+        "steps": 34,
         "style_preset": "photographic"
     })
 
