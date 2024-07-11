@@ -69,27 +69,25 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             MODEL_ID = "stability.stable-diffusion-xl-v1"
 
             POSITIVE_PROMPT = (
-                f"ads background for unique {product_name_eng}, ellipse border."
-                f"{product_feature_eng}"
+                f"ads background for unique {product_name_eng} with ellipse border."
                 f"focus on visually striking, lifelike advertisement scene for {interest_eng}."
                 f"targeted at {age}-year-old {gender_eng}. "
-                f"Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements."
+                "Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements."
                 f"Elegantly incorporate {product_name_eng}, ensuring practical use, while focusing on the container's design and functionality rather than the product itself. "
-                f"Design the setting with bold, clear lines and a monochromatic color scheme in the left two-thirds of the image, adding decorative elements at the edges to enhance the visual appeal."
-                f"masterpiece, high resolution, high quality, hdr, fujifilm xt4, 50mm, f/1.6, sharp focus, high detailed."
+                "Design the setting with bold, clear lines and a monochromatic color scheme in the left two-thirds of the image, adding decorative elements at the edges to enhance the visual appeal."
+                "natural, masterpiece, high resolution, high quality, hdr, fujifilm xt4, 50mm, f/1.6, sharp focus, high detailed."
             )
 
             NEGATIVE_PROMPT = (
-                f"Do not block {product_name_eng} for any element in image."
+                f"Do not block any part of {product_name_eng}."
                 "No human figures, animals, brand logos, or man-made objects should be visible. "
                 "Avoid low resolution, blurring, and any distortions to ensure clarity and photographic realism. "
                 "Exclude painting-like effects to maintain photographic realism. "
-                "Do not include human figures, portraits, or man-made objects. "
-                "Avoid placing any elements in the center of the image."
                 "low resolution, bed quality, ugly, flur, (mutation), extra arms, extra legs, extra fingers, 3d, painting."
             )
 
             seed = random.randrange(1, 1000000)
+            logger.info(seed)
             text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
 
             # 合成圖片
@@ -100,9 +98,9 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             
             # 設置目標尺寸和對應的縮放比例
             target_sizes_and_factors = [
-                ((sizes[0][0], sizes[0][1]), 5.0),
-                ((sizes[1][0], sizes[1][1]), 5.0),
-                ((sizes[2][0], sizes[2][1]), 5.0)
+                ((sizes[0][0], sizes[0][1]), 100),
+                ((sizes[1][0], sizes[1][1]), 100),
+                ((sizes[2][0], sizes[2][1]), 100)
             ]
 
             output_paths = []

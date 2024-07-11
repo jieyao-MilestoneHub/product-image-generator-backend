@@ -8,7 +8,7 @@ import torchvision.transforms as T
 import os
 import sys
 
-# 設定系統路徑
+# Set system path
 sys.path.append("./../../")
 from configs import deepfill_model_path, import_path
 sys.path.append(import_path)
@@ -61,18 +61,20 @@ class ImageReplacer:
         overlay_image = Image.open(overlay_image_path).convert("RGBA")
 
         scaled_base_image = base_image.resize(target_size, Image.Resampling.LANCZOS)
-        self.replace_object(scaled_base_image, overlay_image, output_path, scale_factor)
+        self.replace_object(base_image, scaled_base_image, overlay_image, output_path, scale_factor)
 
-    def replace_object(self, base_image, overlay_image, output_path, scale_factor):
-        base_mask = self.refine_mask(self.get_mask(base_image))
+    def replace_object(self, original_image, scaled_image, overlay_image, output_path, scale_factor):
+        base_mask = self.refine_mask(self.get_mask(original_image))
         if base_mask is None:
             print("No object detected to replace.")
             return
 
-        inpainted_image = self.deepfill.inpaint(base_image, Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L"))
-        transformed_overlay_image, mask_bounds = self.adjust_overlay_size(overlay_image, base_mask, scale_factor)
+        inpainted_image = self.deepfill.inpaint(original_image, Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L"))
+        inpainted_resized = inpainted_image.resize(scaled_image.size, Image.Resampling.LANCZOS)
 
-        result_image = self.merge_images(base_image, transformed_overlay_image, inpainted_image, mask_bounds)
+        transformed_overlay_image, mask_bounds = self.adjust_overlay_size(overlay_image, base_mask, scale_factor, original_image.size, scaled_image.size)
+
+        result_image = self.merge_images(scaled_image, transformed_overlay_image, inpainted_resized, mask_bounds)
         result_image.save(output_path)
         print(f"Image processed and saved to {output_path}")
 
@@ -92,27 +94,30 @@ class ImageReplacer:
         kernel = np.ones((5, 5), np.uint8)
         return cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel) / 255.0
 
-    def adjust_overlay_size(self, overlay_image, base_mask, scale_factor):
-        # 计算遮罩的边界框
+    def adjust_overlay_size(self, overlay_image, base_mask, scale_factor, original_size, target_size):
+        orig_width, orig_height = original_size
+        target_width, target_height = target_size
+
+        # Calculate mask boundaries
         mask_indices = np.column_stack(np.where(base_mask > 0))
         min_y, min_x = mask_indices.min(axis=0)
         max_y, max_x = mask_indices.max(axis=0)
         mask_width = max_x - min_x
         mask_height = max_y - min_y
 
-        # 计算目标物C的缩放比例
+        # Calculate scaling factor for the overlay image
         overlay_ratio = overlay_image.width / overlay_image.height
-        new_width = int(mask_width * scale_factor)
+        new_width = int(mask_width * scale_factor * target_width / orig_width)
         new_height = int(new_width / overlay_ratio)
 
-        # 确保新高度不超过遮罩的1.5倍
-        max_height = int(mask_height * 1.2)
+        # Ensure new height does not exceed 1.2 times the mask height
+        max_height = int(mask_height * 1.2 * target_height / orig_height)
         if new_height > max_height:
             new_height = max_height
             new_width = int(new_height * overlay_ratio)
 
         overlay_resized = overlay_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        return overlay_resized, (min_x, min_y, max_x, max_y)
+        return overlay_resized, (min_x * target_width // orig_width, min_y * target_height // orig_height, max_x * target_width // orig_width, max_y * target_height // orig_height)
 
     def merge_images(self, base_image, overlay_image, inpainted_image, mask_bounds):
         min_x, min_y, max_x, max_y = mask_bounds
@@ -120,14 +125,14 @@ class ImageReplacer:
         overlay_np = np.array(overlay_image.convert("RGBA"))
         inpainted_np = np.array(inpainted_image.convert("RGBA"))
 
-        # 计算放置位置，使目标物C底部与遮罩底部对齐，并水平居中
+        # Calculate position to place the overlay image such that its bottom aligns with the mask's bottom and is centered horizontally
         overlay_position_y = max_y - overlay_image.height
         overlay_position_x = min_x + (max_x - min_x - overlay_image.width) // 2
 
-        # 保持透明背景
+        # Keep transparent background
         combined_np = inpainted_np.copy()
 
-        # 确保目标物C可以超出遮罩范围
+        # Ensure the overlay image can extend beyond the mask boundaries
         overlay_top_y = overlay_position_y
         overlay_bottom_y = overlay_position_y + overlay_np.shape[0]
         overlay_left_x = overlay_position_x
@@ -140,15 +145,15 @@ class ImageReplacer:
 
         for y in range(combined_top_y, combined_bottom_y):
             for x in range(combined_left_x, combined_right_x):
-                oy = y - overlay_position_y
-                ox = x - overlay_position_x
-                if overlay_np[oy, ox, 3] > 0:  # 只复制非透明部分
+                oy = y - overlay_top_y
+                ox = x - overlay_left_x
+                if overlay_np[oy, ox, 3] > 0:  # Only copy non-transparent parts
                     combined_np[y, x] = overlay_np[oy, ox]
 
-        # 将合并后的图像转换为PIL图像
+        # Convert combined array to a PIL image
         combined_image = Image.fromarray(combined_np, "RGBA")
 
-        # 应用高斯模糊来平滑边缘
+        # Apply Gaussian blur to smooth edges
         alpha = combined_image.split()[-1]
         alpha_blurred = alpha.filter(ImageFilter.GaussianBlur(radius=2))
         combined_image.putalpha(alpha_blurred)
@@ -160,10 +165,10 @@ if __name__ == "__main__":
     os.makedirs('output_test', exist_ok=True)
     replacer = ImageReplacer(deepfill_model_path)
 
-    base_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\mask_cnn_model\test_image\travel_3.png"
+    base_image_path = r"C:\Users\USER\Desktop\Develop\sd_sagemaker\content\generated_images\text-image\generated_image_20240710111359.png"
     overlay_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_02_trans.png"
 
-    # 設置目標尺寸、對應的縮放比例和輸出路徑
+    # Set target sizes, corresponding scale factors, and output paths
     target_sizes_and_factors = [
         ((300, 250), 7.0, 'output_test/replaced_300x250.png'),
         ((320, 480), 7.0, 'output_test/replaced_320x480.png'),
