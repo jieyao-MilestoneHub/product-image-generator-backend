@@ -52,14 +52,11 @@ def get_product(product_path, static_path, timestamp):
     return trans_path
 
 # Function to generate the final result images
-def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, timestamp):
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    background_path = os.path.join(static_path, "background", f"background_{now}.png")
-    result_path_prefix = os.path.join(static_path, timestamp, "generated")
+def get_result(product_name, product_feature, gender, age, job, interest, transparent_path, generated_path, background_path):
 
     # Translate text to English using GPT
     product_name_eng = translate_text_gpt(product_name)
-    product_feature_eng = translate_text_gpt(product_feature)
+    # product_feature_eng = translate_text_gpt(product_feature)
     gender_eng = translate_text_gpt(gender)
     interest_eng = translate_text_gpt(interest)
     try_time = 0
@@ -91,9 +88,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
 
             # 合成圖片
-            os.makedirs('output_test', exist_ok=True)
             replacer = ImageReplacer(deepfill_model_path)
-
             img_name = os.path.basename(background_path).split(".")[0]
             
             # 設置目標尺寸和對應的縮放比例
@@ -105,17 +100,22 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
 
             output_paths = []
             for target_size, scale_factor in target_sizes_and_factors:
+
                 width, height = target_size
                 img_name = f"creative_{img_name}_{width}x{height}.png"
-                output_path = os.path.join(result_path_prefix, img_name)
+                output_path = os.path.join(generated_path, img_name)
                 replacer.process_image(background_path, transparent_path, output_path, target_size, scale_factor)
                 logging.info(f"Saved resized image to {output_path}")
-                output_paths.append(os.path.join(timestamp, "generated", img_name))  # 確保後端正確傳遞圖片
+
+                # 確保後端正確傳遞圖片
+                show_path = generated_path.split(os.sep)
+                show_path = os.sep.join(show_path[7:])
+                output_paths.append(os.path.join(show_path, img_name))
 
             return output_paths
 
         except Exception as e:
-            clear_folder(result_path_prefix)
+            clear_folder(generated_path)
             try_time += 1
             logging.error(f"Attempt {try_time}: Error occurred - {e} (result from produce 'target product')")
 

@@ -83,7 +83,7 @@ class ProductImageProcessor:
         non_white = np.all(image < [245, 245, 245], axis=2)
         y_coords, x_coords = np.where(non_white)
         sample_indices = np.linspace(0, len(x_coords) - 1, num=5, dtype=int)
-        points = np.column_stack((x_coords[sample_indices], y_coords[sample_indices]))
+        points = np.column_stack((x_coords[sample_indices], y_coords[sample_indices])).astype(np.float32)
         labels = np.ones(len(points), dtype=int)
         logger.info("Auto-selected points for segmentation")
         return points, labels

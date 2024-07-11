@@ -239,15 +239,16 @@ async def generate_product(
             raise HTTPException(status_code=400, detail="Transparent image is still processing, please wait")
 
         # Generate images
-        generated_dir = os.path.join(STATIC_DIR, timestamp, "generated")
-        os.makedirs(generated_dir, exist_ok=True)
+        generated_path = os.path.join(STATIC_DIR, timestamp, "generated")
+        background_path = os.path.join(STATIC_DIR, timestamp, "background")
+        os.makedirs(generated_path, exist_ok=True)
         logging.info("Generating images")
         audience = target_audience.split(",")
         gender = audience[0]
         age = audience[1]
         job = "no data"
         interest = audience[2]
-        generated_images = get_result(product_name, product_describe, gender, age, job, interest, transparent_path, timestamp=timestamp)
+        generated_images = get_result(product_name, product_describe, gender, age, job, interest, transparent_path, generated_path=generated_path, background_path=background_path)
 
         if not generated_images:
             return JSONResponse(content={"error": "get_result() got the problem"}, status_code=404)
