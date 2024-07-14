@@ -119,14 +119,15 @@ class ImageReplacer:
         overlay_resized = overlay_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
         return overlay_resized, (min_x * target_width // orig_width, min_y * target_height // orig_height, max_x * target_width // orig_width, max_y * target_height // orig_height)
 
+
     def merge_images(self, base_image, overlay_image, inpainted_image, mask_bounds):
-        min_x, min_y, max_x, max_y = mask_bounds
+        min_x, overlay_top_y, max_x, overlay_bottom_y = mask_bounds
         base_image_np = np.array(base_image)
         overlay_np = np.array(overlay_image.convert("RGBA"))
         inpainted_np = np.array(inpainted_image.convert("RGBA"))
 
         # Calculate position to place the overlay image such that its bottom aligns with the mask's bottom and is centered horizontally
-        overlay_position_y = max_y - overlay_image.height
+        overlay_position_y = overlay_top_y
         overlay_position_x = min_x + (max_x - min_x - overlay_image.width) // 2
 
         # Keep transparent background

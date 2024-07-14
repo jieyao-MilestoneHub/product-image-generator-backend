@@ -1,8 +1,12 @@
 import_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration"
 static_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static"
+log_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\app.log"
 sizes = [(300, 250), (320, 480), (336, 280)]
 
-env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\.env"
+env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\.env"
+
+# frontend host
+frontend_host = "http://localhost:3000"
 
 # image_generator_test
 product_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_01.png"
