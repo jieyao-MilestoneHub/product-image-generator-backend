@@ -11,9 +11,9 @@ sys.path.append(import_path)
 from product_image_processor import ProductImageProcessor
 
 # Advertisement background generation using SDXL1.0
-from openai_generator.openai_generator import translate_text_gpt
-from bedrock.text_to_image import text_to_image_request
-from mask_cnn_model.putting_product import ImageReplacer
+from cv_integration.transfer_openai import translate_text_gpt
+from cv_integration.text_to_image_bedrock import text_to_image_request
+from cv_integration.replace_product import ImageReplacer
 
 # Configure logging to use the same configuration as the main application
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             MODEL_ID = "stability.stable-diffusion-xl-v1"
 
             POSITIVE_PROMPT = (
-                f"ads background for unique {product_name_eng} with ellipse border."
+                f"ads background for unique {product_name_eng} of ellipse border and thin width and short."
                 f"focus on visually striking, lifelike advertisement scene for {interest_eng}."
                 f"targeted at {age}-year-old {gender_eng}. "
                 "Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements."
@@ -77,19 +77,20 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
 
             NEGATIVE_PROMPT = (
                 f"Do not block any part of {product_name_eng}."
+                "No borders."
                 "No human figures, animals, brand logos, or man-made objects should be visible. "
                 "Avoid low resolution, blurring, and any distortions to ensure clarity and photographic realism. "
                 "Exclude painting-like effects to maintain photographic realism. "
                 "low resolution, bed quality, ugly, flur, (mutation), extra arms, extra legs, extra fingers, 3d, painting."
             )
 
-            seed = random.randrange(1, 1000000)
+            seed = random.randrange(15000, 30000)
             logger.info(seed)
             text_to_image_request(MODEL_ID, POSITIVE_PROMPT, NEGATIVE_PROMPT, seed, background_path)
 
             # 合成圖片
             replacer = ImageReplacer(deepfill_model_path)
-            img_name = os.path.basename(background_path).split(".")[0]
+            img_base_name = os.path.basename(background_path).split(".")[0]
             
             # 設置目標尺寸和對應的縮放比例
             target_sizes_and_factors = [
@@ -102,7 +103,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             for target_size, scale_factor in target_sizes_and_factors:
 
                 width, height = target_size
-                img_name = f"creative_{img_name}_{width}x{height}.png"
+                img_name = f"creative_{img_base_name}_{width}x{height}.png"
                 output_path = os.path.join(generated_path, img_name)
                 replacer.process_image(background_path, transparent_path, output_path, target_size, scale_factor)
                 logging.info(f"Saved resized image to {output_path}")

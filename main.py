@@ -6,19 +6,23 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 from typing import Dict, List
-import json
 import pandas as pd
+import json
 import io
+import boto3
+
 from cv_integration.text_generator import AdGenerator
 from cv_integration.image_generator import get_product, get_result
-from configs import static_path
+from configs import log_path, frontend_host, static_path
 
 # Configure logging
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-file_handler = logging.FileHandler('app.log', mode='a', encoding='utf-8')
+file_handler = logging.FileHandler(log_path, mode='a', encoding='utf-8')
 file_handler.setFormatter(log_formatter)
 
 stream_handler = logging.StreamHandler()
@@ -34,9 +38,55 @@ logging.basicConfig(level=logging.INFO, handlers=[file_handler, stream_handler])
 
 app = FastAPI()
 
+#----------------------------------------------------------------------------------------#
+# ----- DynamoDB operation ----- #
+dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1')
+user_interactions_table = dynamodb.Table('UserInteractions')
+labels_table = dynamodb.Table('Labels')
+
+# 获取标签描述
+def get_label_descriptions():
+    descriptions = defaultdict(dict)
+    response = labels_table.scan()
+    for item in response['Items']:
+        label_type = item['LabelType']
+        label_id = item['LabelID']
+        description = item['Description']
+        descriptions[label_type][label_id] = description
+    return descriptions
+
+label_descriptions = get_label_descriptions()
+
+# 定义查找UID数据的函数
+def query_items_by_uid(uid):
+    response = user_interactions_table.get_item(
+        Key={'UID': uid}
+    )
+    return response.get('Item')
+
+# 定义并行查找函数
+def parallel_query_items(uids):
+    items = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(query_items_by_uid, uids)
+        for result in results:
+            if result:
+                items.append(result)
+    return items
+
+# 统计标签数据
+def count_labels(label_list, tags_dict):
+    label_counts = {name: 0 for name in tags_dict.values()}
+    total_count = len(label_list)
+    for tag in label_list:
+        label_counts[tags_dict[tag]] += 1
+    return {"labels": list(label_counts.keys()), "values": [(count / total_count) * 100 for count in label_counts.values()]}
+# ----- DynamoDB operation ----- #
+#----------------------------------------------------------------------------------------#
+
 # Allowed frontend URLs
 origins = [
-    "http://localhost:3000",
+    frontend_host
 ]
 
 app.add_middleware(
@@ -46,41 +96,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-with open('mock_dynamo_db.json', 'r') as json_file:
-    data = json.load(json_file)
-
-# Convert the read data into a dictionary
-MOCK_DYNAMO_DB = {k: v for k, v in data.items()}
-
-GENDER_TAGS = {
-    "1001": "男性",
-    "1002": "女性"
-}
-
-AGE_TAGS = {
-    "2001": "18-24",
-    "2002": "25-34",
-    "2003": "35-44",
-    "2004": "45-54",
-    "2005": "55+"
-}
-
-# OCCUPATION_TAGS = {
-#     "3001": "學生",
-#     "3002": "軟體工程師",
-#     "3003": "醫生",
-#     "3004": "教師",
-#     "3005": "其他"
-# }
-
-INTEREST_TAGS = {
-    "4001": "運動體育",
-    "4002": "寵物生活",
-    "4003": "嬰幼保健",
-    "4004": "動漫電競",
-    "4005": "戶外旅遊"
-}
 
 class AdGenerateRequest(BaseModel):
     product_name: str
@@ -98,13 +113,6 @@ class ImageGenerateRequest(BaseModel):
 # Create directory to store images
 STATIC_DIR = static_path
 os.makedirs(STATIC_DIR, exist_ok=True)
-
-# Load targeting options
-def load_target_audiences() -> Dict[str, str]:
-    with open("target_audiences.json", "r", encoding="utf-8") as f:
-        return json.load(f)
-
-TARGET_AUDIENCES = load_target_audiences()
 
 # Save project information to JSON
 def save_project_info(project_info: Dict):
@@ -145,47 +153,36 @@ def cleanup_old_uploads():
 @app.post("/api/upload-audience")
 async def upload_audience(file: UploadFile = File(...)):
     try:
-        # Read CSV file
+        # 读取 CSV 文件
         contents = await file.read()
         df = pd.read_csv(io.BytesIO(contents))
         
-        # Build corresponding structure
-        gender_labels = []
-        age_labels = []
-        # occupation_labels = []
-        interest_labels = []
-        for index, row in df.iterrows():
-            uid = row['uid']
-            if uid in MOCK_DYNAMO_DB:
-                labels = MOCK_DYNAMO_DB[uid]
-                for label in labels:
-                    for tag in label.split(','):
-                        if tag in GENDER_TAGS:
-                            gender_labels.append(tag)
-                        elif tag in AGE_TAGS:
-                            age_labels.append(tag)
-                        # elif tag in OCCUPATION_TAGS:
-                        #     occupation_labels.append(tag)
-                        elif tag in INTEREST_TAGS:
-                            interest_labels.append(tag)
+        # 提取 CSV 中的 UID 列表
+        uids = df['uid'].tolist()
         
-        # Count occurrences of each label
-        def count_labels(label_list, tags_dict):
-            label_counts = {name: 0 for name in tags_dict.values()}
-            for tag in label_list:
-                label_counts[tags_dict[tag]] += 1
-            return {"labels": list(label_counts.keys()), "values": list(label_counts.values())}
+        # 查询 DynamoDB 获取 UID 列表对应的数据
+        all_items = parallel_query_items(uids)
         
-        gender_data = count_labels(gender_labels, GENDER_TAGS)
-        age_data = count_labels(age_labels, AGE_TAGS)
-        # occupation_data = count_labels(occupation_labels, OCCUPATION_TAGS)
-        interest_data = count_labels(interest_labels, INTEREST_TAGS)
+        # 动态处理标签
+        label_results = {label_type: [] for label_type in label_descriptions}
+        
+        for item in all_items:
+            label_ids = item['LabelIDs'].split(',')
+            for label_id in label_ids:
+                for label_type, options in label_descriptions.items():
+                    if label_id in options:
+                        label_results[label_type].append(label_id)
+        
+        # 动态计算每个标签的比例
+        label_statistics = {}
+        for label_type, label_ids in label_results.items():
+            label_statistics[label_type] = count_labels(label_ids, label_descriptions[label_type])
 
+        # 确保响应格式与预期结构匹配
         return {
-            "gender_data": gender_data,
-            "age_data": age_data,
-            # "occupation_data": occupation_data,
-            "interest_data": interest_data
+            "gender_data": label_statistics.get("gender", {"labels": [], "values": []}),
+            "age_data": label_statistics.get("age", {"labels": [], "values": []}),
+            "interest_data": label_statistics.get("interest", {"labels": [], "values": []})
         }
     except Exception as e:
         logging.error(f"Error processing audience upload: {str(e)}")
@@ -193,7 +190,11 @@ async def upload_audience(file: UploadFile = File(...)):
 
 @app.get("/api/target-audiences")
 async def get_target_audiences():
-    return JSONResponse(content=TARGET_AUDIENCES)
+    try:
+        return JSONResponse(content=label_descriptions)
+    except Exception as e:
+        logging.error(f"Error fetching target audiences: {str(e)}")
+        return {"error": str(e)}
 
 @app.post("/api/upload-image")
 async def upload_image(product_image: UploadFile = File(...)):

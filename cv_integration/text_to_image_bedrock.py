@@ -14,8 +14,8 @@ from botocore.exceptions import ClientError
 load_dotenv()
 
 # AWS Credentials
-AWS_KEY_ID = os.getenv("AWS_KEY_ID")
-AWS_KEY_SECRET = os.getenv("AWS_KEY_SECRET")
+AWS_KEY_ID = os.getenv("BEDROCK_AWS_KEY_ID")
+AWS_KEY_SECRET = os.getenv("BEDROCK_AWS_KEY_SECRET")
 
 # Constants
 MODEL_ID = "stability.stable-diffusion-xl-v1"
@@ -105,9 +105,9 @@ def text_to_image_request(model_id, positive_prompt, negative_prompt, seed, gene
             {"text": positive_prompt, "weight": 1},
             {"text": negative_prompt, "weight": -1}
         ],
-        "height": 1024,
-        "width": 1024,
-        "cfg_scale": 12,
+        "height": 512,
+        "width": 512,
+        "cfg_scale": 20,
         "clip_guidance_preset": "SLOW",
         "sampler": "K_DPMPP_2M",
         "samples": 1,
@@ -118,6 +118,7 @@ def text_to_image_request(model_id, positive_prompt, negative_prompt, seed, gene
 
     # Generate and save image
     try:
+        logging.info("seed", seed)
         image_bytes = generate_image_from_text(model_id=model_id, body=body)
         save_image(image_bytes, generated_image_path, adjust=False)
     except ClientError as err:
