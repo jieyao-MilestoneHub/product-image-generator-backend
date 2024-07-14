@@ -9,7 +9,7 @@ import os
 import sys
 
 # Set system path
-sys.path.append("./../../")
+sys.path.append(r"C:\Users\USER\Desktop\Develop\product-image-generator-backend")
 from configs import deepfill_model_path, import_path
 sys.path.append(import_path)
 
@@ -69,10 +69,21 @@ class ImageReplacer:
             print("No object detected to replace.")
             return
 
+        if self.save_intermediate:
+            original_image.save("original_image.png")
+            Image.fromarray((base_mask * 255).astype(np.uint8)).save("base_mask.png")
+
         inpainted_image = self.deepfill.inpaint(original_image, Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L"))
         inpainted_resized = inpainted_image.resize(scaled_image.size, Image.Resampling.LANCZOS)
 
+        if self.save_intermediate:
+            inpainted_image.save("inpainted_image.png")
+            inpainted_resized.save("inpainted_resized.png")
+
         transformed_overlay_image, mask_bounds = self.adjust_overlay_size(overlay_image, base_mask, scale_factor, original_image.size, scaled_image.size)
+
+        if self.save_intermediate:
+            transformed_overlay_image.save("transformed_overlay_image.png")
 
         result_image = self.merge_images(scaled_image, transformed_overlay_image, inpainted_resized, mask_bounds)
         result_image.save(output_path)
@@ -144,8 +155,6 @@ class ImageReplacer:
 
         return overlay_resized, (overlay_position_x, overlay_top_y, overlay_position_x + new_width, overlay_bottom_y)
 
-
-
     def merge_images(self, base_image, overlay_image, inpainted_image, mask_bounds):
         min_x, overlay_top_y, max_x, overlay_bottom_y = mask_bounds
         base_image_np = np.array(base_image)
@@ -190,10 +199,10 @@ class ImageReplacer:
 if __name__ == "__main__":
     # Setup directories and paths
     os.makedirs('output_test', exist_ok=True)
-    replacer = ImageReplacer(deepfill_model_path)
+    replacer = ImageReplacer(deepfill_model_path, save_intermediate=True)
 
-    base_image_path = r"C:\Users\USER\Desktop\Develop\sd_sagemaker\content\generated_images\text-image\generated_image_20240710111359.png"
-    overlay_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_02_trans.png"
+    base_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static\20240714164305\background.png"
+    overlay_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static\product_transparent\20240714164305\product_example_02_transparent.png"
 
     # Set target sizes, corresponding scale factors, and output paths
     target_sizes_and_factors = [
