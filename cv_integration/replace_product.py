@@ -9,7 +9,7 @@ import os
 import sys
 
 # Set system path
-sys.path.append(r"C:\Users\USER\Desktop\Develop\product-image-generator-backend")
+sys.path.append("./../")
 from configs import deepfill_model_path, import_path
 sys.path.append(import_path)
 
@@ -70,20 +70,21 @@ class ImageReplacer:
             return
 
         if self.save_intermediate:
-            original_image.save("original_image.png")
-            Image.fromarray((base_mask * 255).astype(np.uint8)).save("base_mask.png")
+            original_image.save("output_test/original_image.png")
+            mask_image = Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L")
+            mask_image.save("output_test/mask_image.png")
 
         inpainted_image = self.deepfill.inpaint(original_image, Image.fromarray((base_mask * 255).astype(np.uint8)).convert("L"))
-        inpainted_resized = inpainted_image.resize(scaled_image.size, Image.Resampling.LANCZOS)
-
         if self.save_intermediate:
-            inpainted_image.save("inpainted_image.png")
-            inpainted_resized.save("inpainted_resized.png")
+            inpainted_image.save("output_test/inpainted_image.png")
+
+        inpainted_resized = inpainted_image.resize(scaled_image.size, Image.Resampling.LANCZOS)
+        if self.save_intermediate:
+            inpainted_resized.save("output_test/inpainted_resized.png")
 
         transformed_overlay_image, mask_bounds = self.adjust_overlay_size(overlay_image, base_mask, scale_factor, original_image.size, scaled_image.size)
-
         if self.save_intermediate:
-            transformed_overlay_image.save("transformed_overlay_image.png")
+            transformed_overlay_image.save("output_test/transformed_overlay_image.png")
 
         result_image = self.merge_images(scaled_image, transformed_overlay_image, inpainted_resized, mask_bounds)
         result_image.save(output_path)
@@ -121,48 +122,23 @@ class ImageReplacer:
         new_width = int(mask_width * scale_factor * target_width / orig_width)
         new_height = int(new_width / overlay_ratio)
 
-        # Ensure new width and height do not exceed mask boundaries
-        max_width = int(mask_width * 1.25 * target_width / orig_width)
-        max_height = int(mask_height * 1.25 * target_height / orig_height)
-
-        if new_width > max_width:
-            new_width = max_width
-            new_height = int(new_width / overlay_ratio)
-            
+        # Ensure new height does not exceed 1.2 times the mask height
+        max_height = int(mask_height * 1.2 * target_height / orig_height)
         if new_height > max_height:
             new_height = max_height
             new_width = int(new_height * overlay_ratio)
 
         overlay_resized = overlay_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-        # Align overlay image's bottom boundary with the mask's bottom boundary
-        overlay_bottom_y = max_y * target_height // orig_height
-        overlay_top_y = overlay_bottom_y - new_height
-
-        # Ensure the top boundary does not exceed the original image boundaries
-        if overlay_top_y < 0:
-            overlay_top_y = 0
-            overlay_bottom_y = new_height
-
-        # Calculate position to place the overlay image such that its bottom aligns with the mask's bottom boundary and is centered horizontally
-        overlay_position_x = min_x + (mask_width - new_width) // 2
-        if overlay_position_x < 0:
-            overlay_position_x = 0
-
-        overlay_right_x = overlay_position_x + new_width
-        if overlay_right_x > target_width:
-            overlay_position_x = target_width - new_width
-
-        return overlay_resized, (overlay_position_x, overlay_top_y, overlay_position_x + new_width, overlay_bottom_y)
+        return overlay_resized, (min_x * target_width // orig_width, min_y * target_height // orig_height, max_x * target_width // orig_width, max_y * target_height // orig_height)
 
     def merge_images(self, base_image, overlay_image, inpainted_image, mask_bounds):
-        min_x, overlay_top_y, max_x, overlay_bottom_y = mask_bounds
+        min_x, min_y, max_x, max_y = mask_bounds
         base_image_np = np.array(base_image)
         overlay_np = np.array(overlay_image.convert("RGBA"))
         inpainted_np = np.array(inpainted_image.convert("RGBA"))
 
         # Calculate position to place the overlay image such that its bottom aligns with the mask's bottom and is centered horizontally
-        overlay_position_y = overlay_top_y
+        overlay_position_y = max_y - overlay_image.height
         overlay_position_x = min_x + (max_x - min_x - overlay_image.width) // 2
 
         # Keep transparent background
