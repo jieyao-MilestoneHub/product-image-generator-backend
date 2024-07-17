@@ -177,7 +177,7 @@ if __name__ == "__main__":
     os.makedirs('output_test', exist_ok=True)
     replacer = ImageReplacer(deepfill_model_path, save_intermediate=True)
 
-    base_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static\20240714164305\background.png"
+    base_image_path = r"C:\Users\USER\Desktop\Develop\sd_sagemaker\content\generated_images\text-image\generated_image_20240710035354.png"
     overlay_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\static\product_transparent\20240714164305\product_example_02_transparent.png"
 
     # Set target sizes, corresponding scale factors, and output paths

@@ -6,7 +6,7 @@ sizes = [(300, 250), (320, 480), (336, 280)]
 env_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\.env"
 
 # frontend host
-frontend_host = "http://localhost:3000"
+frontend_host = "http://localhost:3001"
 
 # image_generator_test
 product_image_path = r"C:\Users\USER\Desktop\Develop\product-image-generator-backend\cv_integration\product_test\product_example_01.png"

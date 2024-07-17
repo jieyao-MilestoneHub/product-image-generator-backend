@@ -66,7 +66,7 @@ def get_result(product_name, product_feature, gender, age, job, interest, transp
             MODEL_ID = "stability.stable-diffusion-xl-v1"
 
             POSITIVE_PROMPT = (
-                f"ads background for unique {product_name_eng} of ellipse border and thin width and short."
+                f"ads background for unique {product_name_eng} of ellipse border and thin enough width and short."
                 f"focus on visually striking, lifelike advertisement scene for {interest_eng}."
                 f"targeted at {age}-year-old {gender_eng}. "
                 "Use dynamic lighting to enhance depth and showcase a minimalistic texture with elements."
